@@ -12,6 +12,7 @@ COPY package*.json ./
 
 # Cài đặt chỉ các dependencies cần thiết
 RUN npm install --omit=dev --legacy-peer-deps
+RUN npm install --force
 
 # Copy toàn bộ source code vào container
 COPY . .  
