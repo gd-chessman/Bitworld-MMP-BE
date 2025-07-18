@@ -249,7 +249,7 @@ export class TelegramBotService implements OnModuleInit {
 
     async onModuleInit() {
         this.logger.log('🚀 Telegram bot starting...');
-        // await this.startPolling();
+        await this.startPolling();
         this.logger.log('🚀 Telegram bot started');
     }
 
