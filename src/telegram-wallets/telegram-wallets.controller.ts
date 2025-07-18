@@ -32,25 +32,25 @@ export class TelegramWalletsController {
 
     constructor(private readonly telegramWalletsService: TelegramWalletsService) { }
 
-    @Post('connect-wallets')
-    async verifyWallet(@Body() body: { id: string, code: string }) {
-        try {
-            if (!body.id || !body.code) {
-                throw new HttpException({
-                    status: HttpStatus.BAD_REQUEST,
-                    error: 'ID and code are required',
-                    message: 'Missing required fields'
-                }, HttpStatus.BAD_REQUEST);
-            }
-            return await this.telegramWalletsService.verifyWallet(body.id, body.code);
-        } catch (error) {
-            throw new HttpException({
-                status: HttpStatus.INTERNAL_SERVER_ERROR,
-                error: error.message,
-                message: 'Failed to verify wallet'
-            }, HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
+    // @Post('connect-wallets')
+    // async verifyWallet(@Body() body: { id: string, code: string }) {
+    //     try {
+    //         if (!body.id || !body.code) {
+    //             throw new HttpException({
+    //                 status: HttpStatus.BAD_REQUEST,
+    //                 error: 'ID and code are required',
+    //                 message: 'Missing required fields'
+    //             }, HttpStatus.BAD_REQUEST);
+    //         }
+    //         return await this.telegramWalletsService.verifyWallet(body.id, body.code);
+    //     } catch (error) {
+    //         throw new HttpException({
+    //             status: HttpStatus.INTERNAL_SERVER_ERROR,
+    //             error: error.message,
+    //             message: 'Failed to verify wallet'
+    //         }, HttpStatus.INTERNAL_SERVER_ERROR);
+    //     }
+    // }
 
     @UseGuards(JwtAuthGuard)
     @Get('info')
@@ -120,80 +120,80 @@ export class TelegramWalletsController {
     //     }
     // }
 
-    @UseGuards(JwtAuthGuard)
-    @Post('add-wallet')
-    @ApiOperation({ summary: 'Thêm ví mới hoặc import ví đã tồn tại' })
-    @ApiResponse({ status: 200, description: 'Ví đã được thêm thành công', type: AddWalletResponseDto })
-    @ApiResponse({ status: 400, description: 'Dữ liệu không hợp lệ' })
-    @ApiResponse({ status: 401, description: 'Không được phép' })
-    async addWallet(@Request() req, @Body() addWalletDto: AddWalletDto) {
-        try {
-            if (!addWalletDto.type || (addWalletDto.type === 'import' && !addWalletDto.private_key)) {
-                throw new HttpException({
-                    status: HttpStatus.BAD_REQUEST,
-                    error: 'Missing required fields',
-                    message: 'Type is required, and private key is required for import'
-                }, HttpStatus.BAD_REQUEST);
-            }
-            const result = await this.telegramWalletsService.addWallet(req.user, addWalletDto);
-            if (result.status === 409 && result.error_code === 'NICKNAME_EXISTS') {
-                throw new HttpException({
-                    status: HttpStatus.CONFLICT,
-                    error: result.message,
-                    error_code: result.error_code,
-                    message: 'Wallet nickname already exists'
-                }, HttpStatus.CONFLICT);
-            }
-            if (result.status === 400) {
-                throw new HttpException({
-                    status: HttpStatus.BAD_REQUEST,
-                    error: result.message,
-                    message: 'Failed to add wallet'
-                }, HttpStatus.BAD_REQUEST);
-            }
-            return result;
-        } catch (error) {
-            throw new HttpException({
-                status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-                error: error.message,
-                message: error.message
-            }, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
+    // @UseGuards(JwtAuthGuard)
+    // @Post('add-wallet')
+    // @ApiOperation({ summary: 'Thêm ví mới hoặc import ví đã tồn tại' })
+    // @ApiResponse({ status: 200, description: 'Ví đã được thêm thành công', type: AddWalletResponseDto })
+    // @ApiResponse({ status: 400, description: 'Dữ liệu không hợp lệ' })
+    // @ApiResponse({ status: 401, description: 'Không được phép' })
+    // async addWallet(@Request() req, @Body() addWalletDto: AddWalletDto) {
+    //     try {
+    //         if (!addWalletDto.type || (addWalletDto.type === 'import' && !addWalletDto.private_key)) {
+    //             throw new HttpException({
+    //                 status: HttpStatus.BAD_REQUEST,
+    //                 error: 'Missing required fields',
+    //                 message: 'Type is required, and private key is required for import'
+    //             }, HttpStatus.BAD_REQUEST);
+    //         }
+    //         const result = await this.telegramWalletsService.addWallet(req.user, addWalletDto);
+    //         if (result.status === 409 && result.error_code === 'NICKNAME_EXISTS') {
+    //             throw new HttpException({
+    //                 status: HttpStatus.CONFLICT,
+    //                 error: result.message,
+    //                 error_code: result.error_code,
+    //                 message: 'Wallet nickname already exists'
+    //             }, HttpStatus.CONFLICT);
+    //         }
+    //         if (result.status === 400) {
+    //             throw new HttpException({
+    //                 status: HttpStatus.BAD_REQUEST,
+    //                 error: result.message,
+    //                 message: 'Failed to add wallet'
+    //             }, HttpStatus.BAD_REQUEST);
+    //         }
+    //         return result;
+    //     } catch (error) {
+    //         throw new HttpException({
+    //             status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+    //             error: error.message,
+    //             message: error.message
+    //         }, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
+    //     }
+    // }
 
-    @UseGuards(JwtAuthGuard)
-    @Post('delete-wallet')
-    @ApiOperation({ summary: 'Xóa liên kết ví' })
-    @ApiResponse({ status: 200, description: 'Ví đã được xóa liên kết thành công', type: DeleteWalletResponseDto })
-    @ApiResponse({ status: 400, description: 'Dữ liệu không hợp lệ' })
-    @ApiResponse({ status: 401, description: 'Không được phép' })
-    @ApiResponse({ status: 404, description: 'Ví không tìm thấy' })
-    async deleteWallet(@Request() req, @Body() deleteWalletDto: DeleteWalletDto) {
-        try {
-            if (!deleteWalletDto.wallet_id) {
-                throw new HttpException({
-                    status: HttpStatus.BAD_REQUEST,
-                    error: 'Wallet ID is required',
-                    message: 'Missing required fields'
-                }, HttpStatus.BAD_REQUEST);
-            }
-            const result = await this.telegramWalletsService.deleteWallet(req.user, deleteWalletDto.wallet_id);
-            if (result.status === 404) {
-                throw new HttpException({
-                    status: HttpStatus.NOT_FOUND,
-                    error: result.message,
-                    message: 'Wallet not found'
-                }, HttpStatus.NOT_FOUND);
-            }
-            return result;
-        } catch (error) {
-            throw new HttpException({
-                status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-                error: error.message,
-                message: 'Failed to delete wallet'
-            }, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
+    // @UseGuards(JwtAuthGuard)
+    // @Post('delete-wallet')
+    // @ApiOperation({ summary: 'Xóa liên kết ví' })
+    // @ApiResponse({ status: 200, description: 'Ví đã được xóa liên kết thành công', type: DeleteWalletResponseDto })
+    // @ApiResponse({ status: 400, description: 'Dữ liệu không hợp lệ' })
+    // @ApiResponse({ status: 401, description: 'Không được phép' })
+    // @ApiResponse({ status: 404, description: 'Ví không tìm thấy' })
+    // async deleteWallet(@Request() req, @Body() deleteWalletDto: DeleteWalletDto) {
+    //     try {
+    //         if (!deleteWalletDto.wallet_id) {
+    //             throw new HttpException({
+    //                 status: HttpStatus.BAD_REQUEST,
+    //                 error: 'Wallet ID is required',
+    //                 message: 'Missing required fields'
+    //             }, HttpStatus.BAD_REQUEST);
+    //         }
+    //         const result = await this.telegramWalletsService.deleteWallet(req.user, deleteWalletDto.wallet_id);
+    //         if (result.status === 404) {
+    //             throw new HttpException({
+    //                 status: HttpStatus.NOT_FOUND,
+    //                 error: result.message,
+    //                 message: 'Wallet not found'
+    //             }, HttpStatus.NOT_FOUND);
+    //         }
+    //         return result;
+    //     } catch (error) {
+    //         throw new HttpException({
+    //             status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+    //             error: error.message,
+    //             message: 'Failed to delete wallet'
+    //         }, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
+    //     }
+    // }
 
     @UseGuards(SimpleJwtAuthGuard)
     @Post('update-wallet')
@@ -259,193 +259,193 @@ export class TelegramWalletsController {
         }
     }
 
-    @UseGuards(SimpleJwtAuthGuard)
-    @Get('get-my-wallets')
-    @ApiOperation({ summary: 'Lấy danh sách tất cả các ví được liên kết với người dùng' })
-    @ApiResponse({ status: 200, description: 'Trả về danh sách các ví', type: GetMyWalletsResponseDto })
-    @ApiResponse({ status: 401, description: 'Không được phép' })
-    @ApiResponse({ status: 404, description: 'Không tìm thấy người dùng' })
-    async getMyWallets(@Request() req) {
-        try {
-            const result = await this.telegramWalletsService.getMyWallets(req.user);
-            if (result.status === 404) {
-                throw new HttpException({
-                    status: HttpStatus.NOT_FOUND,
-                    error: result.message,
-                    message: 'User not found'
-                }, HttpStatus.NOT_FOUND);
-            }
-            return result;
-        } catch (error) {
-            throw new HttpException({
-                status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-                error: error.message,
-                message: 'Failed to get wallets'
-            }, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
+    // @UseGuards(SimpleJwtAuthGuard)
+    // @Get('get-my-wallets')
+    // @ApiOperation({ summary: 'Lấy danh sách tất cả các ví được liên kết với người dùng' })
+    // @ApiResponse({ status: 200, description: 'Trả về danh sách các ví', type: GetMyWalletsResponseDto })
+    // @ApiResponse({ status: 401, description: 'Không được phép' })
+    // @ApiResponse({ status: 404, description: 'Không tìm thấy người dùng' })
+    // async getMyWallets(@Request() req) {
+    //     try {
+    //         const result = await this.telegramWalletsService.getMyWallets(req.user);
+    //         if (result.status === 404) {
+    //             throw new HttpException({
+    //                 status: HttpStatus.NOT_FOUND,
+    //                 error: result.message,
+    //                 message: 'User not found'
+    //             }, HttpStatus.NOT_FOUND);
+    //         }
+    //         return result;
+    //     } catch (error) {
+    //         throw new HttpException({
+    //             status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+    //             error: error.message,
+    //             message: 'Failed to get wallets'
+    //         }, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
+    //     }
+    // }
 
-    @UseGuards(JwtAuthGuard)
-    @Post('use-wallet')
-    @ApiOperation({ summary: 'Chuyển đổi sang ví khác và nhận token mới' })
-    @ApiResponse({ status: 200, description: 'Chuyển đổi ví thành công, trả về token mới', type: UseWalletResponseDto })
-    @ApiResponse({ status: 400, description: 'Dữ liệu không hợp lệ' })
-    @ApiResponse({ status: 401, description: 'Không được phép' })
-    @ApiResponse({ status: 404, description: 'Ví không tìm thấy hoặc không liên kết với người dùng' })
-    async useWallet(@Request() req, @Body() useWalletDto: UseWalletDto) {
-        try {
-            if (!useWalletDto.wallet_id) {
-                throw new HttpException({
-                    status: HttpStatus.BAD_REQUEST,
-                    error: 'Wallet ID is required',
-                    message: 'Missing required fields'
-                }, HttpStatus.BAD_REQUEST);
-            }
-            const result = await this.telegramWalletsService.useWallet(req.user, useWalletDto.wallet_id);
-            if (result.status === 404) {
-                throw new HttpException({
-                    status: HttpStatus.NOT_FOUND,
-                    error: result.message,
-                    message: 'Wallet not found'
-                }, HttpStatus.NOT_FOUND);
-            }
-            return result;
-        } catch (error) {
-            throw new HttpException({
-                status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-                error: error.message,
-                message: 'Failed to switch wallet'
-            }, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
+    // @UseGuards(JwtAuthGuard)
+    // @Post('use-wallet')
+    // @ApiOperation({ summary: 'Chuyển đổi sang ví khác và nhận token mới' })
+    // @ApiResponse({ status: 200, description: 'Chuyển đổi ví thành công, trả về token mới', type: UseWalletResponseDto })
+    // @ApiResponse({ status: 400, description: 'Dữ liệu không hợp lệ' })
+    // @ApiResponse({ status: 401, description: 'Không được phép' })
+    // @ApiResponse({ status: 404, description: 'Ví không tìm thấy hoặc không liên kết với người dùng' })
+    // async useWallet(@Request() req, @Body() useWalletDto: UseWalletDto) {
+    //     try {
+    //         if (!useWalletDto.wallet_id) {
+    //             throw new HttpException({
+    //                 status: HttpStatus.BAD_REQUEST,
+    //                 error: 'Wallet ID is required',
+    //                 message: 'Missing required fields'
+    //             }, HttpStatus.BAD_REQUEST);
+    //         }
+    //         const result = await this.telegramWalletsService.useWallet(req.user, useWalletDto.wallet_id);
+    //         if (result.status === 404) {
+    //             throw new HttpException({
+    //                 status: HttpStatus.NOT_FOUND,
+    //                 error: result.message,
+    //                 message: 'Wallet not found'
+    //             }, HttpStatus.NOT_FOUND);
+    //         }
+    //         return result;
+    //     } catch (error) {
+    //         throw new HttpException({
+    //             status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+    //             error: error.message,
+    //             message: 'Failed to switch wallet'
+    //         }, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
+    //     }
+    // }
 
-    @UseGuards(JwtAuthGuard)
-    @Post('create-token-pumpfun')
-    @UseInterceptors(FileInterceptor('image'))
-    @ApiOperation({ summary: 'Tạo token mới' })
-    async createToken(
-        @Request() req,
-        @Body() createTokenDto: CreateTokenDto,
-        @UploadedFile() file: any
-    ) {
-        try {
-            if (!createTokenDto.name || !createTokenDto.symbol || !file) {
-                throw new HttpException({
-                    status: HttpStatus.BAD_REQUEST,
-                    error: 'Name, symbol and image are required',
-                    message: 'Missing required fields'
-                }, HttpStatus.BAD_REQUEST);
-            }
-            const result = await this.telegramWalletsService.createTokenPumpfun(req.user, createTokenDto, file);
+    // @UseGuards(JwtAuthGuard)
+    // @Post('create-token-pumpfun')
+    // @UseInterceptors(FileInterceptor('image'))
+    // @ApiOperation({ summary: 'Tạo token mới' })
+    // async createToken(
+    //     @Request() req,
+    //     @Body() createTokenDto: CreateTokenDto,
+    //     @UploadedFile() file: any
+    // ) {
+    //     try {
+    //         if (!createTokenDto.name || !createTokenDto.symbol || !file) {
+    //             throw new HttpException({
+    //                 status: HttpStatus.BAD_REQUEST,
+    //                 error: 'Name, symbol and image are required',
+    //                 message: 'Missing required fields'
+    //             }, HttpStatus.BAD_REQUEST);
+    //         }
+    //         const result = await this.telegramWalletsService.createTokenPumpfun(req.user, createTokenDto, file);
 
-            if (result.status === 400) {
-                throw new HttpException({
-                    status: HttpStatus.BAD_REQUEST,
-                    error: result.message,
-                    message: 'Failed to create token'
-                }, HttpStatus.BAD_REQUEST);
-            }
+    //         if (result.status === 400) {
+    //             throw new HttpException({
+    //                 status: HttpStatus.BAD_REQUEST,
+    //                 error: result.message,
+    //                 message: 'Failed to create token'
+    //             }, HttpStatus.BAD_REQUEST);
+    //         }
 
-            if (result.status === 404) {
-                throw new HttpException({
-                    status: HttpStatus.NOT_FOUND,
-                    error: result.message,
-                    message: 'Wallet not found'
-                }, HttpStatus.NOT_FOUND);
-            }
+    //         if (result.status === 404) {
+    //             throw new HttpException({
+    //                 status: HttpStatus.NOT_FOUND,
+    //                 error: result.message,
+    //                 message: 'Wallet not found'
+    //             }, HttpStatus.NOT_FOUND);
+    //         }
 
-            return {
-                status: HttpStatus.CREATED,
-                message: 'Token created successfully',
-                data: 'data' in result ? result.data : null
-            };
-        } catch (error) {
-            if (error instanceof HttpException) {
-                throw error;
-            }
+    //         return {
+    //             status: HttpStatus.CREATED,
+    //             message: 'Token created successfully',
+    //             data: 'data' in result ? result.data : null
+    //         };
+    //     } catch (error) {
+    //         if (error instanceof HttpException) {
+    //             throw error;
+    //         }
 
-            throw new HttpException({
-                status: HttpStatus.INTERNAL_SERVER_ERROR,
-                error: error.message,
-                message: 'Failed to create token'
-            }, HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
+    //         throw new HttpException({
+    //             status: HttpStatus.INTERNAL_SERVER_ERROR,
+    //             error: error.message,
+    //             message: 'Failed to create token'
+    //         }, HttpStatus.INTERNAL_SERVER_ERROR);
+    //     }
+    // }
 
-    @UseGuards(JwtAuthGuard)
-    @Post('create-token-memepump')
-    @UseInterceptors(FileInterceptor('image'))
-    @ApiOperation({ summary: 'Tạo token mới trên Solana' })
-    async createTokenMemepump(
-        @Request() req,
-        @Body() createTokenDto: CreateTokenDto,
-        @UploadedFile() file: any
-    ) {
-        try {
-            if (!createTokenDto.name || !createTokenDto.symbol || !file) {
-                throw new HttpException({
-                    status: HttpStatus.BAD_REQUEST,
-                    error: 'Name, symbol and image are required',
-                    message: 'Missing required fields'
-                }, HttpStatus.BAD_REQUEST);
-            }
-            const result = await this.telegramWalletsService.createTokenMemepump(req.user, createTokenDto, file);
+    // @UseGuards(JwtAuthGuard)
+    // @Post('create-token-memepump')
+    // @UseInterceptors(FileInterceptor('image'))
+    // @ApiOperation({ summary: 'Tạo token mới trên Solana' })
+    // async createTokenMemepump(
+    //     @Request() req,
+    //     @Body() createTokenDto: CreateTokenDto,
+    //     @UploadedFile() file: any
+    // ) {
+    //     try {
+    //         if (!createTokenDto.name || !createTokenDto.symbol || !file) {
+    //             throw new HttpException({
+    //                 status: HttpStatus.BAD_REQUEST,
+    //                 error: 'Name, symbol and image are required',
+    //                 message: 'Missing required fields'
+    //             }, HttpStatus.BAD_REQUEST);
+    //         }
+    //         const result = await this.telegramWalletsService.createTokenMemepump(req.user, createTokenDto, file);
 
-            if (result.status === 400) {
-                throw new HttpException({
-                    status: HttpStatus.BAD_REQUEST,
-                    error: result.message,
-                    message: 'Failed to create token'
-                }, HttpStatus.BAD_REQUEST);
-            }
+    //         if (result.status === 400) {
+    //             throw new HttpException({
+    //                 status: HttpStatus.BAD_REQUEST,
+    //                 error: result.message,
+    //                 message: 'Failed to create token'
+    //             }, HttpStatus.BAD_REQUEST);
+    //         }
 
-            if (result.status === 404) {
-                throw new HttpException({
-                    status: HttpStatus.NOT_FOUND,
-                    error: result.message,
-                    message: 'Wallet not found'
-                }, HttpStatus.NOT_FOUND);
-            }
+    //         if (result.status === 404) {
+    //             throw new HttpException({
+    //                 status: HttpStatus.NOT_FOUND,
+    //                 error: result.message,
+    //                 message: 'Wallet not found'
+    //             }, HttpStatus.NOT_FOUND);
+    //         }
 
-            // Type guard for Keypair
-            function isKeypair(obj: any): obj is { publicKey: any; secretKey: any } {
-                return obj && obj.secretKey && obj.publicKey;
-            }
-            const bs58 = require('bs58');
+    //         // Type guard for Keypair
+    //         function isKeypair(obj: any): obj is { publicKey: any; secretKey: any } {
+    //             return obj && obj.secretKey && obj.publicKey;
+    //         }
+    //         const bs58 = require('bs58');
             
-            // Tính toán decimals mặc định dựa trên totalSupply
-            const totalSupply = createTokenDto.totalSupply || 1000000000;
-            const defaultDecimals = totalSupply > 3000000000 ? 6 : 9;
-            const finalDecimals = createTokenDto.decimals !== undefined ? createTokenDto.decimals : defaultDecimals;
+    //         // Tính toán decimals mặc định dựa trên totalSupply
+    //         const totalSupply = createTokenDto.totalSupply || 1000000000;
+    //         const defaultDecimals = totalSupply > 3000000000 ? 6 : 9;
+    //         const finalDecimals = createTokenDto.decimals !== undefined ? createTokenDto.decimals : defaultDecimals;
             
-            return {
-                status: HttpStatus.CREATED,
-                message: 'Token created successfully',
-                data: {
-                    name: createTokenDto.name || null,
-                    symbol: createTokenDto.symbol || null,
-                    decimals: finalDecimals,
-                    description: createTokenDto.description || null,
-                    logoUrl: (result as any).logoUrl || null,
-                    metadataUri: result.metadataUri || null,
-                    mintPublicKey: isKeypair(result.mint) ? result.mint.publicKey.toBase58() : (result.mint?.toBase58?.() || null),
-                    mintPrivateKey: isKeypair(result.mint) ? bs58.encode(result.mint.secretKey) : null,
-                    metadataAddress: result.metadataAddress?.toBase58?.() || null,
-                    transactionHash: (result as any).transactionHash || null
-                }
-            };
-        } catch (error) {
-            if (error instanceof HttpException) {
-                throw error;
-            }
+    //         return {
+    //             status: HttpStatus.CREATED,
+    //             message: 'Token created successfully',
+    //             data: {
+    //                 name: createTokenDto.name || null,
+    //                 symbol: createTokenDto.symbol || null,
+    //                 decimals: finalDecimals,
+    //                 description: createTokenDto.description || null,
+    //                 logoUrl: (result as any).logoUrl || null,
+    //                 metadataUri: result.metadataUri || null,
+    //                 mintPublicKey: isKeypair(result.mint) ? result.mint.publicKey.toBase58() : (result.mint?.toBase58?.() || null),
+    //                 mintPrivateKey: isKeypair(result.mint) ? bs58.encode(result.mint.secretKey) : null,
+    //                 metadataAddress: result.metadataAddress?.toBase58?.() || null,
+    //                 transactionHash: (result as any).transactionHash || null
+    //             }
+    //         };
+    //     } catch (error) {
+    //         if (error instanceof HttpException) {
+    //             throw error;
+    //         }
 
-            throw new HttpException({
-                status: HttpStatus.INTERNAL_SERVER_ERROR,
-                error: error.message,
-                message: 'Failed to create token'
-            }, HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
+    //         throw new HttpException({
+    //             status: HttpStatus.INTERNAL_SERVER_ERROR,
+    //             error: error.message,
+    //             message: 'Failed to create token'
+    //         }, HttpStatus.INTERNAL_SERVER_ERROR);
+    //     }
+    // }
 
     @Get('get-my-tokens')
     @UseGuards(JwtAuthGuard)
@@ -517,32 +517,32 @@ export class TelegramWalletsController {
         }
     }
 
-    @Get('get-info/:id_or_private_key')
-    @ApiOperation({
-        summary: 'Lấy thông tin ví theo wallet_id hoặc private key',
-        description: 'Truyền vào wallet_id hoặc Solana private key để lấy thông tin ví'
-    })
-    @ApiResponse({ status: 200, description: 'Trả về thông tin của ví', type: GetWalletInfoResponseDto })
-    @ApiResponse({ status: 404, description: 'Không tìm thấy ví' })
-    async getWalletInfoById(@Param('id_or_private_key') idOrPrivateKey: string) {
-        try {
-            const result = await this.telegramWalletsService.getWalletInfoById(idOrPrivateKey);
-            if (result.status === 404) {
-                throw new HttpException({
-                    status: HttpStatus.NOT_FOUND,
-                    error: result.message,
-                    message: 'Wallet not found'
-                }, HttpStatus.NOT_FOUND);
-            }
-            return result;
-        } catch (error) {
-            throw new HttpException({
-                status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-                error: error.message,
-                message: 'Failed to get wallet info'
-            }, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
+    // @Get('get-info/:id_or_private_key')
+    // @ApiOperation({
+    //     summary: 'Lấy thông tin ví theo wallet_id hoặc private key',
+    //     description: 'Truyền vào wallet_id hoặc Solana private key để lấy thông tin ví'
+    // })
+    // @ApiResponse({ status: 200, description: 'Trả về thông tin của ví', type: GetWalletInfoResponseDto })
+    // @ApiResponse({ status: 404, description: 'Không tìm thấy ví' })
+    // async getWalletInfoById(@Param('id_or_private_key') idOrPrivateKey: string) {
+    //     try {
+    //         const result = await this.telegramWalletsService.getWalletInfoById(idOrPrivateKey);
+    //         if (result.status === 404) {
+    //             throw new HttpException({
+    //                 status: HttpStatus.NOT_FOUND,
+    //                 error: result.message,
+    //                 message: 'Wallet not found'
+    //             }, HttpStatus.NOT_FOUND);
+    //         }
+    //         return result;
+    //     } catch (error) {
+    //         throw new HttpException({
+    //             status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+    //             error: error.message,
+    //             message: 'Failed to get wallet info'
+    //         }, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
+    //     }
+    // }
 
     @UseGuards(JwtAuthGuard)
     @Post('set-password')
@@ -556,18 +556,18 @@ export class TelegramWalletsController {
         return this.telegramWalletsService.setWalletPassword(req.user.uid, dto);
     }
 
-    @UseGuards(JwtAuthGuard)
-    @Post('private-keys')
-    @ApiOperation({ summary: 'Get wallet private keys (requires password verification)' })
-    @ApiResponse({ status: 200, description: 'Private keys retrieved successfully' })
-    @ApiResponse({ status: 401, description: 'Invalid password or password not set' })
-    @ApiResponse({ status: 404, description: 'Wallet not found' })
-    async getWalletPrivateKeys(
-        @Req() req,
-        @Body() dto: VerifyWalletPasswordDto
-    ) {
-        return this.telegramWalletsService.getWalletPrivateKeys(req.user.uid, req.user.wallet_id, dto);
-    }
+    // @UseGuards(JwtAuthGuard)
+    // @Post('private-keys')
+    // @ApiOperation({ summary: 'Get wallet private keys (requires password verification)' })
+    // @ApiResponse({ status: 200, description: 'Private keys retrieved successfully' })
+    // @ApiResponse({ status: 401, description: 'Invalid password or password not set' })
+    // @ApiResponse({ status: 404, description: 'Wallet not found' })
+    // async getWalletPrivateKeys(
+    //     @Req() req,
+    //     @Body() dto: VerifyWalletPasswordDto
+    // ) {
+    //     return this.telegramWalletsService.getWalletPrivateKeys(req.user.uid, req.user.wallet_id, dto);
+    // }
 
     @UseGuards(JwtAuthGuard)
     @Get('send-code-reset-password')
