@@ -17,6 +17,7 @@ import { TradingOrder } from '../trade/entities/trading-order.entity';
 import { WalletReferent } from '../referral/entities/wallet-referent.entity';
 import { ReferentLevelReward } from '../referral/entities/referent-level-rewards.entity';
 import { BgRefService } from '../referral/bg-ref.service';
+import { CreateUserDto } from './dto/create-user.dto';
 
 @Injectable()
 export class AdminService implements OnModuleInit {
@@ -316,7 +317,11 @@ export class AdminService implements OnModuleInit {
   }
 
   async logout(response: Response): Promise<{ message: string }> {
-    response.clearCookie('access_token');
+    response.clearCookie('access_token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'none'
+    });
     return { message: 'Logged out successfully' };
   }
 
@@ -1367,6 +1372,45 @@ export class AdminService implements OnModuleInit {
     };
   }
 
+  async createUser(createUserDto: CreateUserDto, currentUser: UserAdmin): Promise<{ message: string; user: any }> {
+    // Kiểm tra quyền - chỉ admin mới được tạo user
+    if (currentUser.role !== AdminRole.ADMIN) {
+      throw new UnauthorizedException('Only admin can create new users');
+    }
+
+    // Kiểm tra username và email đã tồn tại chưa
+    const existingUser = await this.userAdminRepository.findOne({
+      where: [
+        { username: createUserDto.username },
+        { email: createUserDto.email }
+      ]
+    });
+
+    if (existingUser) {
+      throw new ConflictException('Username or email already exists');
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
+
+    // Tạo user mới
+    const newUser = this.userAdminRepository.create({
+      username: createUserDto.username,
+      email: createUserDto.email,
+      password: hashedPassword,
+      role: createUserDto.role
+    });
+
+    const savedUser = await this.userAdminRepository.save(newUser);
+
+    // Trả về thông tin user (không bao gồm password)
+    const { password, ...userInfo } = savedUser;
+
+    return {
+      message: 'User created successfully',
+      user: userInfo
+    };
+  }
 
 
   /**

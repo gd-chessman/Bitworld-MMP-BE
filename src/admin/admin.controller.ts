@@ -19,6 +19,8 @@ import * as path from 'path';
 import { ReferentSetting } from '../referral/entities/referent-setting.entity';
 import { WalletReferent } from '../referral/entities/wallet-referent.entity';
 import { ReferentLevelReward } from '../referral/entities/referent-level-rewards.entity';
+import { CreateUserDto } from './dto/create-user.dto';
+import { ConflictException, HttpException, HttpStatus, UnauthorizedException } from '@nestjs/common';
 
 @ApiTags('admin')
 @Controller('admin')
@@ -412,6 +414,41 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Returns comprehensive traditional referral statistics' })
   async getTraditionalReferralStatistics() {
     return this.adminService.getTraditionalReferralStatistics();
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Post('users')
+  @ApiOperation({ summary: 'Create new user (Admin only)' })
+  @ApiResponse({ status: 201, description: 'User created successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid input data' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can create users' })
+  @ApiResponse({ status: 409, description: 'Username or email already exists' })
+  async createUser(@Body() createUserDto: CreateUserDto, @Request() req) {
+    try {
+      return await this.adminService.createUser(createUserDto, req.user);
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        throw new HttpException({
+          status: HttpStatus.CONFLICT,
+          error: error.message,
+          message: 'Username or email already exists'
+        }, HttpStatus.CONFLICT);
+      }
+      
+      if (error instanceof UnauthorizedException) {
+        throw new HttpException({
+          status: HttpStatus.UNAUTHORIZED,
+          error: error.message,
+          message: 'Only admin can create new users'
+        }, HttpStatus.UNAUTHORIZED);
+      }
+      
+      throw new HttpException({
+        status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+        error: error.message,
+        message: 'Failed to create user'
+      }, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
+    }
   }
 
 }
