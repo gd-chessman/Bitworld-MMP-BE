@@ -2389,4 +2389,78 @@ export class TelegramWalletsService {
     async updateExistingTokenLogoUrls(): Promise<{ updated: number; errors: number }> {
         return await this.solanaService.updateExistingTokenLogoUrls();
     }
+
+    async getWalletByEmail(email: string, walletType?: string) {
+        
+        try {
+            // Tìm user wallet theo email
+            const userWallet = await this.userWalletRepository.findOne({
+                where: { uw_email: email }
+            });
+
+            if (!userWallet) {
+                return {
+                    success: false,
+                    message: 'User not found with this email',
+                    data: null
+                };
+            }
+
+            // Tìm wallet auth của user này
+            let walletAuthQuery = this.walletAuthRepository
+                .createQueryBuilder('wa')
+                .leftJoinAndSelect('wa.wa_wallet', 'wallet')
+                .where('wa.wa_user_id = :userId', { userId: userWallet.uw_id });
+
+            // Nếu có walletType, thêm điều kiện lọc
+            if (walletType) {
+                walletAuthQuery = walletAuthQuery.andWhere('wa.wa_type = :walletType', { walletType });
+            }
+
+            const walletAuths = await walletAuthQuery.getMany();
+
+            if (!walletAuths || walletAuths.length === 0) {
+                this.logger.log(`No wallet auth found for user: ${userWallet.uw_id}`);
+                return {
+                    success: false,
+                    message: 'No wallet found for this user',
+                    data: null
+                };
+            }
+
+            // Lấy ví đầu tiên (hoặc ví main nếu có)
+            let selectedWalletAuth = walletAuths[0];
+            if (walletType) {
+                selectedWalletAuth = walletAuths.find(wa => wa.wa_type === walletType) || walletAuths[0];
+            } else {
+                // Ưu tiên ví main
+                selectedWalletAuth = walletAuths.find(wa => wa.wa_type === 'main') || walletAuths[0];
+            }
+
+            const wallet = selectedWalletAuth.wa_wallet;
+
+            this.logger.log(`Found wallet: ${wallet.wallet_id} for user: ${userWallet.uw_id}`);
+
+            return {
+                success: true,
+                message: 'Wallet information retrieved successfully',
+                data: {
+                    walletId: wallet.wallet_id,
+                    solanaAddress: wallet.wallet_solana_address,
+                    ethAddress: wallet.wallet_eth_address,
+                    nickName: wallet.wallet_nick_name || 'Unnamed Wallet',
+                    walletType: selectedWalletAuth.wa_type,
+                    userEmail: userWallet.uw_email
+                }
+            };
+
+        } catch (error) {
+            this.logger.error('Error in getWalletByEmail:', error);
+            return {
+                success: false,
+                message: 'An error occurred while searching for wallet',
+                data: null
+            };
+        }
+    }
 }

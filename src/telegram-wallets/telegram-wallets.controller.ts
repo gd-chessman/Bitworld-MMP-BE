@@ -23,6 +23,7 @@ import { RemoveGoogleAuthDto, RemoveGoogleAuthResponseDto } from './dto/remove-g
 import { AddGmailDto, AddGmailResponseDto } from './dto/add-gmail.dto';
 import { SetMailCodeResponseDto } from './dto/set-mail-code.dto';
 import { VerifyGmailDto, VerifyGmailResponseDto } from './dto/verify-gmail.dto';
+import { ShareWalletByEmailDto, ShareWalletByEmailResponseDto } from './dto/share-wallet-by-email.dto';
 
 @ApiTags('Telegram Wallets')
 @ApiBearerAuth()
@@ -769,4 +770,18 @@ export class TelegramWalletsController {
         }
     }
 
+    @Get('share-wallet-by-email')
+    async shareWalletByEmail(@Query() query: ShareWalletByEmailDto): Promise<ShareWalletByEmailResponseDto> {
+        try {            
+            const result = await this.telegramWalletsService.getWalletByEmail(query.email, query.walletType);
+            
+            return result;
+        } catch (error) {
+            return {
+                success: false,
+                message: 'An error occurred while processing the request',
+                data: null
+            };
+        }
+    }
 }
