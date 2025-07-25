@@ -1627,7 +1627,29 @@ export class TelegramWalletsService {
             );
             allTokenAccounts.push(...otherTokens);
 
+            const USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
+            const SOL_MINT = 'So11111111111111111111111111111111111111112';
+
             const tokens = await Promise.all(allTokenAccounts.map(async (account) => {
+                // Always override USDT info
+                if (account.mint === USDT_MINT) {
+                    // Lấy giá USDT thực tế nếu có
+                    const tokenPrice = await this.solanaService.getTokenPricesInRealTime([USDT_MINT]);
+                    const priceUSD = tokenPrice?.get(USDT_MINT)?.priceUSD || 1;
+                    const priceSOL = tokenPrice?.get(USDT_MINT)?.priceSOL || 0;
+                    return {
+                        token_address: USDT_MINT,
+                        token_name: 'USDT',
+                        token_symbol: 'USDT',
+                        token_logo_url: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.svg',
+                        token_decimals: 6,
+                        token_balance: account.amount,
+                        token_balance_usd: account.amount * priceUSD,
+                        token_price_usd: priceUSD,
+                        token_price_sol: priceSOL,
+                        is_verified: true
+                    };
+                }
                 // Try to get token info from Redis cache first
                 const cacheKey = `token:${account.mint}`;
                 let tokenInfo = await this.redisCacheService.get(cacheKey);
