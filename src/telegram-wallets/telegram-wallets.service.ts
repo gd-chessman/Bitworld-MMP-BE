@@ -1552,7 +1552,63 @@ export class TelegramWalletsService {
             const walletAddress = wallet.wallet_solana_address;
             const tokenAccounts = await this.solanaService.getTokenAccounts(walletAddress);
 
-            const tokens = await Promise.all(tokenAccounts.map(async (account) => {
+            // Default tokens to always include
+            const defaultTokens = [
+                'So11111111111111111111111111111111111111112', // SOL
+                'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB' // USDT
+            ];
+
+            // Get balances for default tokens that are not in user's token accounts
+            const missingDefaultTokens = defaultTokens.filter(mint => 
+                !tokenAccounts.some(account => account.mint === mint)
+            );
+
+            // Get SOL balance (native SOL)
+            let solBalance = 0;
+            if (missingDefaultTokens.includes('So11111111111111111111111111111111111111112')) {
+                try {
+                    const solBalanceInfo = await this.getWalletBalance(walletAddress);
+                    if (solBalanceInfo.status === 200 && solBalanceInfo.data) {
+                        solBalance = solBalanceInfo.data.sol_balance || 0;
+                    }
+                } catch (error) {
+                    this.logger.error(`Error fetching SOL balance: ${error.message}`);
+                }
+            }
+
+            // Get USDT balance if not in token accounts
+            let usdtBalance = 0;
+            if (missingDefaultTokens.includes('Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB')) {
+                try {
+                    usdtBalance = await this.solanaService.getTokenBalance(
+                        walletAddress, 
+                        'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'
+                    );
+                } catch (error) {
+                    this.logger.error(`Error fetching USDT balance: ${error.message}`);
+                }
+            }
+
+            // Combine user's tokens with default tokens, avoiding duplicates
+            const allTokenAccounts = [...tokenAccounts];
+            
+            // Add SOL if not present
+            if (missingDefaultTokens.includes('So11111111111111111111111111111111111111112')) {
+                allTokenAccounts.push({
+                    mint: 'So11111111111111111111111111111111111111112',
+                    amount: solBalance
+                });
+            }
+            
+            // Add USDT if not present
+            if (missingDefaultTokens.includes('Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB')) {
+                allTokenAccounts.push({
+                    mint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+                    amount: usdtBalance
+                });
+            }
+
+            const tokens = await Promise.all(allTokenAccounts.map(async (account) => {
                 // Try to get token info from Redis cache first
                 const cacheKey = `token:${account.mint}`;
                 let tokenInfo = await this.redisCacheService.get(cacheKey);
