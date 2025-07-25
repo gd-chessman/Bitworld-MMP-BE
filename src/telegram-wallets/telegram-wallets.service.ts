@@ -1589,24 +1589,43 @@ export class TelegramWalletsService {
                 }
             }
 
-            // Combine user's tokens with default tokens, avoiding duplicates
-            const allTokenAccounts = [...tokenAccounts];
+            // Combine user's tokens with default tokens, ensuring SOL and USDT are at the beginning
+            const allTokenAccounts: Array<{ mint: string; amount: number }> = [];
             
-            // Add SOL if not present
+            // Add SOL first (always at index 0)
             if (missingDefaultTokens.includes('So11111111111111111111111111111111111111112')) {
                 allTokenAccounts.push({
                     mint: 'So11111111111111111111111111111111111111112',
                     amount: solBalance
                 });
+            } else {
+                // Find SOL in user's token accounts and add it first
+                const solAccount = tokenAccounts.find(account => account.mint === 'So11111111111111111111111111111111111111112');
+                if (solAccount) {
+                    allTokenAccounts.push(solAccount);
+                }
             }
             
-            // Add USDT if not present
+            // Add USDT second (always at index 1)
             if (missingDefaultTokens.includes('Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB')) {
                 allTokenAccounts.push({
                     mint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
                     amount: usdtBalance
                 });
+            } else {
+                // Find USDT in user's token accounts and add it second
+                const usdtAccount = tokenAccounts.find(account => account.mint === 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB');
+                if (usdtAccount) {
+                    allTokenAccounts.push(usdtAccount);
+                }
             }
+            
+            // Add all other tokens (excluding SOL and USDT which are already added)
+            const otherTokens = tokenAccounts.filter(account => 
+                account.mint !== 'So11111111111111111111111111111111111111112' && 
+                account.mint !== 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'
+            );
+            allTokenAccounts.push(...otherTokens);
 
             const tokens = await Promise.all(allTokenAccounts.map(async (account) => {
                 // Try to get token info from Redis cache first
