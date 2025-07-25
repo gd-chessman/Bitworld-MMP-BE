@@ -287,51 +287,15 @@ export class LoginEmailService {
                     return true;
                 } catch (bgError) {
                     this.logger.error(`Error adding to BG affiliate tree: ${bgError.message}`);
-                    // Nếu thêm vào BG affiliate thất bại, fallback về multi-level
-                    this.logger.log(`Falling back to multi-level referral for wallet ${inviteeWalletId}`);
+                    // Nếu thêm vào BG affiliate thất bại, không tạo referral truyền thống nữa
+                    return false;
                 }
             }
-            
-            // Tạo quan hệ multi-level truyền thống
-            const MAX_LEVELS = 10;
-            type ReferralRelation = {
-                wr_wallet_invitee: number;
-                wr_wallet_referent: number;
-                wr_wallet_level: number;
-            };
-            const referralRelationships: ReferralRelation[] = [];
-            
-            // Thêm quan hệ giới thiệu cấp 1 (trực tiếp)
-            referralRelationships.push({
-                wr_wallet_invitee: inviteeWalletId,
-                wr_wallet_referent: referrerWalletId,
-                wr_wallet_level: 1
-            });
-            
-            // Tìm tất cả người giới thiệu của người giới thiệu (cấp 2 đến cấp 9)
-            const upperReferrers = await this.findUpperReferrers(referrerWalletId);
-            
-            // Thêm từng quan hệ giới thiệu từ cấp 2 trở lên (nếu có)
-            for (let i = 0; i < upperReferrers.length && i < MAX_LEVELS - 1; i++) {
-                const level = i + 2;
-                referralRelationships.push({
-                    wr_wallet_invitee: inviteeWalletId,
-                    wr_wallet_referent: upperReferrers[i].referrer_id,
-                    wr_wallet_level: level
-                });
-            }
-            
-            // Lưu tất cả các quan hệ giới thiệu vào cơ sở dữ liệu
-            for (const relation of referralRelationships) {
-                const newReferral = this.walletReferentRepository.create(relation);
-                await this.walletReferentRepository.save(newReferral);
-                this.logger.log(`Created level ${relation.wr_wallet_level} referral: wallet ${relation.wr_wallet_referent} referred wallet ${relation.wr_wallet_invitee}`);
-            }
-            
-            this.logger.log(`Created ${referralRelationships.length} multi-level referral relationships for wallet ${inviteeWalletId}`);
-            return true;
+            // Nếu không phải BG affiliate thì không tạo referral truyền thống nữa
+            this.logger.log(`Referrer ${referrerWalletId} is not BG affiliate. Multi-level referral is disabled.`);
+            return false;
         } catch (error) {
-            this.logger.error(`Error creating referral relationships: ${error.message}`, error.stack);
+            this.logger.error(`Error in createReferralRelationship: ${error.message}`);
             return false;
         }
     }
