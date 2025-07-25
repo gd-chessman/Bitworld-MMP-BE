@@ -39,6 +39,15 @@ export class UpdateWalletDto {
     @IsString()
     @IsOptional()
     country?: string;
+
+    @ApiProperty({
+        description: 'Bittworld UID (unique, optional)',
+        example: 'BWT123456789',
+        required: false
+    })
+    @IsString()
+    @IsOptional()
+    bittworld_uid?: string;
 }
 
 export class UpdateWalletResponseDto {

@@ -1,5 +1,6 @@
-import { Controller, Post, Body, BadRequestException, Logger } from '@nestjs/common';
+import { Controller, Post, Body, BadRequestException, Logger, Req } from '@nestjs/common';
 import { LoginEmailService, GoogleLoginDto, LoginResponse } from './login-email.service';
+import { Request } from 'express';
 
 @Controller('login-email')
 export class LoginEmailController {
@@ -10,10 +11,10 @@ export class LoginEmailController {
     ) {}
 
     @Post()
-    async loginWithEmail(@Body() googleData: GoogleLoginDto): Promise<LoginResponse> {
+    async loginWithEmail(@Body() googleData: GoogleLoginDto, @Req() req: Request): Promise<LoginResponse> {
         try {
             this.logger.log(`Received login request for email: ${googleData.code}`);
-            return await this.loginEmailService.handleGoogleLogin(googleData);
+            return await this.loginEmailService.handleGoogleLogin(googleData, req);
         } catch (error) {
             this.logger.error(`Error in loginWithEmail: ${error.message}`, error.stack);
             throw new BadRequestException({

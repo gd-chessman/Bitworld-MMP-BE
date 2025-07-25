@@ -783,10 +783,10 @@ export class TelegramWalletsService {
         }
     }
 
-    async updateWallet(user, updateWalletDto: { wallet_id: number; name: string; nick_name?: string; country?: string }) {
+    async updateWallet(user, updateWalletDto: { wallet_id: number; name: string; nick_name?: string; country?: string; bittworld_uid?: string }) {
         try {
             const { uid } = user;
-            const { wallet_id, name, nick_name, country } = updateWalletDto;
+            const { wallet_id, name, nick_name, country, bittworld_uid } = updateWalletDto;
 
             // Kiểm tra user có tồn tại không
             const userWallet = await this.userWalletRepository.findOne({
@@ -874,8 +874,24 @@ export class TelegramWalletsService {
                 walletAuth.wa_wallet.wallet_country = country;
             }
 
+            // Cập nhật bittworld_uid nếu được truyền vào
+            if (bittworld_uid !== undefined) {
+                // Kiểm tra unique
+                const existingWalletWithBittworldUid = await this.listWalletRepository.findOne({
+                    where: { bittworld_uid }
+                });
+                if (existingWalletWithBittworldUid && existingWalletWithBittworldUid.wallet_id !== wallet_id) {
+                    return {
+                        status: 409,
+                        error_code: 'BITTWORLD_UID_EXISTS',
+                        message: 'Bittworld UID already exists',
+                    };
+                }
+                walletAuth.wa_wallet.bittworld_uid = bittworld_uid;
+            }
+
             // Lưu thay đổi vào list_wallets
-            if (nick_name || country !== undefined) {
+            if (nick_name || country !== undefined || bittworld_uid !== undefined) {
                 await this.listWalletRepository.save(walletAuth.wa_wallet);
             }
 
@@ -894,7 +910,8 @@ export class TelegramWalletsService {
                     wallet_nick_name: walletAuth.wa_wallet.wallet_nick_name,
                     wallet_country: walletAuth.wa_wallet.wallet_country,
                     solana_address: walletAuth.wa_wallet?.wallet_solana_address || null,
-                    eth_address: walletAuth.wa_wallet?.wallet_eth_address || null
+                    eth_address: walletAuth.wa_wallet?.wallet_eth_address || null,
+                    bittworld_uid: walletAuth.wa_wallet?.bittworld_uid || null
                 }
             };
         } catch (error) {
@@ -960,7 +977,8 @@ export class TelegramWalletsService {
                 wallet_type: walletAuth.wa_type,
                 wallet_name: walletAuth.wa_name,
                 solana_address: walletAuth.wa_wallet?.wallet_solana_address || null,
-                eth_address: walletAuth.wa_wallet?.wallet_eth_address || null
+                eth_address: walletAuth.wa_wallet?.wallet_eth_address || null,
+                bittworld_uid: walletAuth.wa_wallet?.bittworld_uid || null
             };
 
             // Xóa liên kết trong wallet_auth

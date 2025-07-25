@@ -12,6 +12,8 @@ import { BgRefService } from '../referral/bg-ref.service';
 import { Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { ethers } from 'ethers';
+import { ConfigService } from '@nestjs/config';
+import { Request } from 'express';
 
 export interface GoogleLoginDto {
     code: string;  // Authorization code from Google
@@ -53,9 +55,10 @@ export class LoginEmailService {
         private readonly authService: AuthService,
         private readonly googleAuthService: GoogleAuthService,
         private readonly bgRefService: BgRefService,
+        private readonly configService: ConfigService,
     ) {}
 
-    async handleGoogleLogin(loginData: GoogleLoginDto): Promise<LoginResponse> {
+    async handleGoogleLogin(loginData: GoogleLoginDto, req: Request): Promise<LoginResponse> {
         try {
             this.logger.debug('Starting Google login process with code:', {
                 codeLength: loginData.code.length,
@@ -82,6 +85,21 @@ export class LoginEmailService {
 
             this.logger.log(`Processing Google login for email: ${userInfo.email}`);
 
+            // Lấy domain từ frontend request
+            const origin = req.headers.origin || req.headers.referer;
+            let frontendDomain = '';
+            if (origin) {
+                try {
+                    const url = new URL(origin);
+                    frontendDomain = url.hostname.toLowerCase();
+                } catch (error) {
+                    this.logger.warn(`Invalid origin/referer: ${origin}`);
+                }
+            }
+            
+            const bittworldDomain = this.configService.get<string>('BITTWORLD_DOMAIN', '').toLowerCase();
+            const isBittworld = !!bittworldDomain && frontendDomain === bittworldDomain;
+            
             // 3. Find or create user
             let userWallet = await this.findUserByEmail(userInfo.email);
             let listWallet: ListWallet;
@@ -91,7 +109,8 @@ export class LoginEmailService {
                 // Create new user and wallet with active_email = true
                 const newUser = this.userWalletRepository.create({
                     uw_email: userInfo.email,
-                    active_email: true  // Set active_email = true for new user
+                    active_email: true,  // Set active_email = true for new user
+                    isBittworld: isBittworld
                 });
                 await this.userWalletRepository.save(newUser);
 
@@ -118,7 +137,8 @@ export class LoginEmailService {
                     wallet_eth_address: ethAddress,
                     wallet_status: true,
                     wallet_auth: 'member',
-                    wallet_code_ref: referralCode
+                    wallet_code_ref: referralCode,
+                    isBittworld: isBittworld
                 });
                 await this.listWalletRepository.save(newWallet);
 

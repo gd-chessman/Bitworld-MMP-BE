@@ -27,6 +27,13 @@ export class UserWallet {
     @Column({ default: false })
     active_email: boolean;
 
+    @Column({
+        type: 'boolean',
+        default: false,
+        comment: 'Is Bittworld user wallet?'
+    })
+    isBittworld: boolean;
+
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;
 

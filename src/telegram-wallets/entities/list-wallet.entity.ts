@@ -62,6 +62,22 @@ export class ListWallet {
     })
     wallet_code_ref: string;
 
+    @Column({
+        type: 'varchar',
+        length: 100,
+        unique: true,
+        nullable: true,
+        comment: 'Bittworld UID (unique)'
+    })
+    bittworld_uid: string;
+
+    @Column({
+        type: 'boolean',
+        default: false,
+        comment: 'Is Bittworld wallet?'
+    })
+    isBittworld: boolean;
+
     @OneToMany(() => WalletAuth, walletAuth => walletAuth.wa_wallet)
     wallet_auths: WalletAuth[];
 

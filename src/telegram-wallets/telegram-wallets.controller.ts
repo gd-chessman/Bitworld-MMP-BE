@@ -33,25 +33,25 @@ export class TelegramWalletsController {
 
     constructor(private readonly telegramWalletsService: TelegramWalletsService) { }
 
-    @Post('connect-wallets')
-    async verifyWallet(@Body() body: { id: string, code: string }) {
-        try {
-            if (!body.id || !body.code) {
-                throw new HttpException({
-                    status: HttpStatus.BAD_REQUEST,
-                    error: 'ID and code are required',
-                    message: 'Missing required fields'
-                }, HttpStatus.BAD_REQUEST);
-            }
-            return await this.telegramWalletsService.verifyWallet(body.id, body.code);
-        } catch (error) {
-            throw new HttpException({
-                status: HttpStatus.INTERNAL_SERVER_ERROR,
-                error: error.message,
-                message: 'Failed to verify wallet'
-            }, HttpStatus.INTERNAL_SERVER_ERROR);
-        }
-    }
+    // @Post('connect-wallets')
+    // async verifyWallet(@Body() body: { id: string, code: string }) {
+    //     try {
+    //         if (!body.id || !body.code) {
+    //             throw new HttpException({
+    //                 status: HttpStatus.BAD_REQUEST,
+    //                 error: 'ID and code are required',
+    //                 message: 'Missing required fields'
+    //             }, HttpStatus.BAD_REQUEST);
+    //         }
+    //         return await this.telegramWalletsService.verifyWallet(body.id, body.code);
+    //     } catch (error) {
+    //         throw new HttpException({
+    //             status: HttpStatus.INTERNAL_SERVER_ERROR,
+    //             error: error.message,
+    //             message: 'Failed to verify wallet'
+    //         }, HttpStatus.INTERNAL_SERVER_ERROR);
+    //     }
+    // }
 
     @UseGuards(JwtAuthGuard)
     @Get('info')
