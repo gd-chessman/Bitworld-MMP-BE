@@ -34,7 +34,7 @@ async function bootstrap() {
 
   const corsConfig = {
     origin: process.env.NODE_ENV === 'production'
-      ? ['https://bitworld-mmp-fe-production.up.railway.app', 'http://localhost:3001', 'http://localhost:8000', 'http://localhost:3600', 'http://localhost:3700']
+      ? ['https://bitworld-mmp-fe-production.up.railway.app', 'http://localhost:3000', 'http://localhost:3001', 'http://localhost:3600', 'http://localhost:3700']
       : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:8000', 'http://localhost:3600', 'http://localhost:3700'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-No-Redirect', 'token'],
