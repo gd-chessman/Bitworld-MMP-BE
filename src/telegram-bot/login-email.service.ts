@@ -90,15 +90,24 @@ export class LoginEmailService {
             let frontendDomain = '';
             if (origin) {
                 try {
-                    const url = new URL(origin);
-                    frontendDomain = url.hostname.toLowerCase();
-                } catch (error) {
-                    this.logger.warn(`Invalid origin/referer: ${origin}`);
+                    frontendDomain = new URL(origin).hostname.toLowerCase();
+                } catch {
+                    frontendDomain = origin.replace(/^https?:\/\//, '').replace(/^www\./, '');
                 }
             }
-            
-            const bittworldDomain = this.configService.get<string>('BITTWORLD_DOMAIN', '').toLowerCase();
-            const isBittworld = !!bittworldDomain && frontendDomain === bittworldDomain;
+
+            // Lấy domain từ biến môi trường (có thể là URL đầy đủ)
+            const envDomain = this.configService.get<string>('BITTWORLD_DOMAIN', '').toLowerCase();
+            let bittworldDomain = '';
+            try {
+                bittworldDomain = new URL(envDomain).hostname.toLowerCase();
+            } catch {
+                bittworldDomain = envDomain.replace(/^https?:\/\//, '').replace(/^www\./, '');
+            }
+
+            // So sánh hostname, loại bỏ www. nếu muốn nhận diện linh hoạt
+            const normalize = (domain: string) => domain.replace(/^www\./, '');
+            const isBittworld = !!bittworldDomain && normalize(frontendDomain) === normalize(bittworldDomain);
             
             // 3. Find or create user
             let userWallet = await this.findUserByEmail(userInfo.email);
