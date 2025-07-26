@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, OnModuleInit, UnauthorizedException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit, UnauthorizedException, ConflictException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { SolanaListCategoriesToken, CategoryPrioritize, CategoryStatus } from '../solana/entities/solana-list-categories-token.entity';
@@ -1375,7 +1375,7 @@ export class AdminService implements OnModuleInit {
   async createUser(createUserDto: CreateUserDto, currentUser: UserAdmin): Promise<{ message: string; user: any }> {
     // Kiểm tra quyền - chỉ admin mới được tạo user
     if (currentUser.role !== AdminRole.ADMIN) {
-      throw new UnauthorizedException('Only admin can create new users');
+      throw new ForbiddenException('Only admin can create new users');
     }
 
     // Kiểm tra username và email đã tồn tại chưa
@@ -1412,6 +1412,50 @@ export class AdminService implements OnModuleInit {
     };
   }
 
+  async getUsers(page: number = 1, limit: number = 20, role?: 'admin' | 'member' | 'partner', search?: string) {
+    const query = this.userAdminRepository.createQueryBuilder('user')
+      .select(['user.id', 'user.username', 'user.email', 'user.role', 'user.createdAt', 'user.updatedAt'])
+      .orderBy('user.id', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    if (role) query.andWhere('user.role = :role', { role });
+    if (search) query.andWhere('(user.username ILIKE :search OR user.email ILIKE :search)', { search: `%${search}%` });
+
+    const [users, total] = await query.getManyAndCount();
+
+    return {
+      data: users,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
+    };
+  }
+
+  async getUserStats() {
+    // Tổng số user
+    const total = await this.userAdminRepository.count();
+    // Số user theo từng role
+    const adminCount = await this.userAdminRepository.count({ where: { role: AdminRole.ADMIN } });
+    const memberCount = await this.userAdminRepository.count({ where: { role: AdminRole.MEMBER } });
+    const partnerCount = await this.userAdminRepository.count({ where: { role: AdminRole.PARTNER } });
+    // Số user tạo mới 7 ngày gần nhất
+    const recent = await this.userAdminRepository.createQueryBuilder('user')
+      .where('user.createdAt >= NOW() - INTERVAL \'7 days\'')
+      .getCount();
+    return {
+      total,
+      byRole: {
+        admin: adminCount,
+        member: memberCount,
+        partner: partnerCount
+      },
+      createdLast7Days: recent
+    };
+  }
 
   /**
    * Cập nhật trạng thái của BG affiliate node
@@ -1912,6 +1956,44 @@ export class AdminService implements OnModuleInit {
         }
       }
     };
+  }
+
+  async updateUser(id: number, updateUserDto: Partial<{ username: string; email: string; password: string; role: string }>, currentUser: UserAdmin) {
+    // Chỉ admin mới được cập nhật
+    if (currentUser.role !== AdminRole.ADMIN) {
+      throw new ForbiddenException('Only admin can update users');
+    }
+    // Không cho phép cập nhật admin khác
+    const user = await this.userAdminRepository.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.role === AdminRole.ADMIN && user.id !== currentUser.id) {
+      throw new ForbiddenException('Cannot update another admin');
+    }
+    // Không cho phép đổi role thành admin nếu không phải chính mình
+    if (updateUserDto.role === AdminRole.ADMIN && user.id !== currentUser.id) {
+      throw new ForbiddenException('Cannot grant admin role to another user');
+    }
+    // Nếu có password thì hash lại
+    if (updateUserDto.password) {
+      updateUserDto.password = await bcrypt.hash(updateUserDto.password, 10);
+    }
+    Object.assign(user, updateUserDto);
+    await this.userAdminRepository.save(user);
+    const { password, ...userInfo } = user;
+    return { message: 'User updated successfully', user: userInfo };
+  }
+
+  async deleteUser(id: number, currentUser: UserAdmin) {
+    if (currentUser.role !== AdminRole.ADMIN) {
+      throw new ForbiddenException('Only admin can delete users');
+    }
+    const user = await this.userAdminRepository.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.role === AdminRole.ADMIN) {
+      throw new ForbiddenException('Cannot delete admin accounts');
+    }
+    await this.userAdminRepository.remove(user);
+    return { message: 'User deleted successfully' };
   }
 
 }

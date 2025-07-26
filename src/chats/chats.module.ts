@@ -16,6 +16,7 @@ import { MasterGroup } from '../master-trading/entities/master-group.entity';
 import { MasterGroupAuth } from '../master-trading/entities/master-group-auth.entity';
 import { MasterConnect } from '../master-trading/entities/master-connect.entity';
 import { AuthModule } from '../auth/auth.module';
+import { CloudinaryModule } from '../common/cloudinary/cloudinary.module';
 
 @Module({
     imports: [
@@ -34,7 +35,8 @@ import { AuthModule } from '../auth/auth.module';
         ]),
         forwardRef(() => TelegramWalletsModule),
         forwardRef(() => SolanaModule),
-        forwardRef(() => AuthModule)
+        forwardRef(() => AuthModule),
+        CloudinaryModule
     ],
     controllers: [ChatsController],
     providers: [ChatsService, ChatsGateway],

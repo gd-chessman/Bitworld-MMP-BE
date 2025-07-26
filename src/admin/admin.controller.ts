@@ -451,4 +451,50 @@ export class AdminController {
     }
   }
 
+  @UseGuards(JwtAuthAdminGuard)
+  @Get('users')
+  @ApiOperation({ summary: 'Get list of admin users' })
+  @ApiResponse({ status: 200, description: 'List of users' })
+  async getUsers(
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 20,
+    @Query('role') role?: 'admin' | 'member' | 'partner',
+    @Query('search') search?: string
+  ) {
+    return await this.adminService.getUsers(page, limit, role, search);
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Get('user-stats')
+  @ApiOperation({ summary: 'Get user statistics' })
+  @ApiResponse({ status: 200, description: 'User statistics' })
+  async getUserStats() {
+    return await this.adminService.getUserStats();
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Put('users/:id')
+  @ApiOperation({ summary: 'Update admin user (admin only, cannot update other admins)' })
+  @ApiResponse({ status: 200, description: 'User updated successfully' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  async updateUser(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() updateUserDto: Partial<CreateUserDto>,
+    @Request() req
+  ) {
+    return await this.adminService.updateUser(id, updateUserDto, req.user);
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Delete('users/:id')
+  @ApiOperation({ summary: 'Delete admin user (admin only, cannot delete other admins)' })
+  @ApiResponse({ status: 200, description: 'User deleted successfully' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  async deleteUser(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req
+  ) {
+    return await this.adminService.deleteUser(id, req.user);
+  }
+
 }

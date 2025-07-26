@@ -1,10 +1,9 @@
-import { Controller, Post, Get, Param, Body, UseGuards, Query, Request } from '@nestjs/common';
+import { Controller, Post, Get, Param, Body, UseGuards, Query, Request, UseInterceptors, UploadedFiles } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ChatsService } from './chats.service';
 import { SendMessageDto } from './dto/send-message.dto';
-import { ApiTags, ApiOperation, ApiParam, ApiBody, ApiQuery } from '@nestjs/swagger';
 
-@ApiTags('Chats')
 @UseGuards(JwtAuthGuard)
 @Controller('chats')
 export class ChatsController {
@@ -12,21 +11,31 @@ export class ChatsController {
 
     @Post('send-message/token/:token_address')
     @UseGuards(JwtAuthGuard)
-    @ApiOperation({ summary: 'Send a message to a token chat' })
-    @ApiParam({ name: 'token_address', description: 'Token address' })
-    @ApiBody({ type: SendMessageDto })
+    @UseInterceptors(FilesInterceptor('images', 10))
     async sendMessage(
         @Param('token_address') tokenAddress: string,
-        @Body() sendMessageDto: { content: string, lang?: string },
+        @Body() sendMessageDto: { content?: string, lang?: string },
+        @UploadedFiles() files: Express.Multer.File[],
         @Request() req: any
     ) {
         try {
             const walletId = req.user.wallet_id;
+            
+            // Nếu có files hình ảnh, upload lên Cloudinary trước
+            let imageUrls: string[] = [];
+            if (files && files.length > 0) {
+                for (const file of files) {
+                    const uploadResult = await this.chatsService.uploadImageToCloudinary(file);
+                    imageUrls.push(uploadResult.secure_url);
+                }
+            }
+            
             const chatHistory = await this.chatsService.sendMessage(
                 tokenAddress,
-                sendMessageDto.content,
+                sendMessageDto.content || '',
                 walletId,
-                sendMessageDto.lang
+                sendMessageDto.lang,
+                imageUrls.length > 0 ? imageUrls : undefined
             );
             return {
                 status: 200,
@@ -42,18 +51,29 @@ export class ChatsController {
 
     @Post('send-message/all')
     @UseGuards(JwtAuthGuard)
-    @ApiOperation({ summary: 'Send a message to the ALL chat' })
-    @ApiBody({ type: SendMessageDto })
+    @UseInterceptors(FilesInterceptor('images', 10))
     async sendMessageToAll(
-        @Body() sendMessageDto: { content: string, lang?: string },
+        @Body() sendMessageDto: { content?: string, lang?: string },
+        @UploadedFiles() files: Express.Multer.File[],
         @Request() req: any
     ) {
         try {
             const walletId = req.user.wallet_id;
+            
+            // Nếu có files hình ảnh, upload lên Cloudinary trước
+            let imageUrls: string[] = [];
+            if (files && files.length > 0) {
+                for (const file of files) {
+                    const uploadResult = await this.chatsService.uploadImageToCloudinary(file);
+                    imageUrls.push(uploadResult.secure_url);
+                }
+            }
+            
             const chatHistory = await this.chatsService.sendMessageToAll(
-                sendMessageDto.content,
+                sendMessageDto.content || '',
                 walletId,
-                sendMessageDto.lang
+                sendMessageDto.lang,
+                imageUrls.length > 0 ? imageUrls : undefined
             );
             return {
                 status: 200,
@@ -69,21 +89,31 @@ export class ChatsController {
 
     @Post('send-message/group/:group_id')
     @UseGuards(JwtAuthGuard)
-    @ApiOperation({ summary: 'Send a message to a group chat' })
-    @ApiParam({ name: 'group_id', description: 'Group ID' })
-    @ApiBody({ type: SendMessageDto })
+    @UseInterceptors(FilesInterceptor('images', 10))
     async sendMessageToGroup(
         @Param('group_id') groupId: number,
-        @Body() sendMessageDto: { content: string, lang?: string },
+        @Body() sendMessageDto: { content?: string, lang?: string },
+        @UploadedFiles() files: Express.Multer.File[],
         @Request() req: any
     ) {
         try {
             const walletId = req.user.wallet_id;
+            
+            // Nếu có files hình ảnh, upload lên Cloudinary trước
+            let imageUrls: string[] = [];
+            if (files && files.length > 0) {
+                for (const file of files) {
+                    const uploadResult = await this.chatsService.uploadImageToCloudinary(file);
+                    imageUrls.push(uploadResult.secure_url);
+                }
+            }
+            
             const chatHistory = await this.chatsService.sendMessageToGroup(
                 groupId,
-                sendMessageDto.content,
+                sendMessageDto.content || '',
                 walletId,
-                sendMessageDto.lang
+                sendMessageDto.lang,
+                imageUrls.length > 0 ? imageUrls : undefined
             );
             return {
                 status: 200,
@@ -99,7 +129,6 @@ export class ChatsController {
 
     @Get('all-histories')
     @UseGuards(JwtAuthGuard)
-    @ApiOperation({ summary: 'Get chat history for ALL chat' })
     async getAllChatHistories(
         @Request() req: any
     ) {
@@ -121,9 +150,6 @@ export class ChatsController {
 
     @Get('token-histories/:token_address')
     @UseGuards(JwtAuthGuard)
-    @ApiOperation({ summary: 'Get chat history for a specific token' })
-    @ApiParam({ name: 'token_address', description: 'Token address' })
-    @ApiQuery({ name: 'lang', required: false, type: String })
     async getTokenChatHistories(
         @Param('token_address') tokenAddress: string,
         @Request() req: any
@@ -146,11 +172,6 @@ export class ChatsController {
 
     @Get('group-histories/:group_id')
     @UseGuards(JwtAuthGuard)
-    @ApiOperation({ summary: 'Get chat history for a specific group' })
-    @ApiParam({ name: 'group_id', description: 'Group ID' })
-    @ApiQuery({ name: 'limit', required: false, type: Number })
-    @ApiQuery({ name: 'skip', required: false, type: Number })
-    @ApiQuery({ name: 'lang', required: false, type: String })
     async getGroupChatHistories(
         @Param('group_id') groupId: number,
         @Query('limit') limit: number = 50,
@@ -180,7 +201,6 @@ export class ChatsController {
 
     @Post('read-all')
     @UseGuards(JwtAuthGuard)
-    @ApiOperation({ summary: 'Mark all messages in ALL chat as read' })
     async markAllAsRead(@Request() req: any) {
         try {
             const walletId = req.user.wallet_id;
@@ -199,8 +219,6 @@ export class ChatsController {
 
     @Post('read-token/:token_address')
     @UseGuards(JwtAuthGuard)
-    @ApiOperation({ summary: 'Mark all messages in a token chat as read' })
-    @ApiParam({ name: 'token_address', description: 'Token address' })
     async markTokenAsRead(
         @Param('token_address') tokenAddress: string,
         @Request() req: any
@@ -222,8 +240,6 @@ export class ChatsController {
 
     @Post('read-group/:group_id')
     @UseGuards(JwtAuthGuard)
-    @ApiOperation({ summary: 'Mark all messages in a group chat as read' })
-    @ApiParam({ name: 'group_id', description: 'Group ID' })
     async markGroupAsRead(
         @Param('group_id') groupId: number,
         @Request() req: any

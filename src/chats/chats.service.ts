@@ -14,6 +14,7 @@ import { ListWallet } from '../telegram-wallets/entities/list-wallet.entity';
 import { MasterGroup } from '../master-trading/entities/master-group.entity';
 import { MasterGroupAuth } from '../master-trading/entities/master-group-auth.entity';
 import { MasterConnect } from '../master-trading/entities/master-connect.entity';
+import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
 import { In } from 'typeorm';
 
 @Injectable()
@@ -39,7 +40,8 @@ export class ChatsService implements OnModuleInit {
         private chatReadModel: Model<ChatRead>,
         @Inject(forwardRef(() => ChatsGateway))
         private readonly chatsGateway: ChatsGateway,
-        private telegramWalletsService: TelegramWalletsService
+        private telegramWalletsService: TelegramWalletsService,
+        private cloudinaryService: CloudinaryService
     ) { }
 
     async onModuleInit() {
@@ -111,7 +113,7 @@ export class ChatsService implements OnModuleInit {
         }
     }
 
-    async sendMessage(tokenAddress: string, content: string, walletId: number, lang: string = 'kr'): Promise<any> {
+    async sendMessage(tokenAddress: string, content: string, walletId: number, lang: string = 'kr', imageUrls?: string[]): Promise<any> {
         try {
             const chat = await this.createChatToken(tokenAddress);
             const wallet = await this.listWalletRepository.findOne({
@@ -122,11 +124,15 @@ export class ChatsService implements OnModuleInit {
                 throw new Error('Wallet not found');
             }
 
+            // Xác định loại tin nhắn
+            const isImageMessage = imageUrls && imageUrls.length > 0;
+            const messageType = isImageMessage ? 'image' : 'text';
+
             const chatHistory = await this.chatHistoryModel.create({
                 ch_id: `${new Date().getTime()}-${Math.floor(Math.random() * 1000)}`,
                 ch_chat_id: chat.chat_id,
-                ch_content: content,
-                ch_type: 'text',
+                ch_content: content || '', // Text content (có thể là caption cho hình ảnh)
+                ch_image_list: isImageMessage ? JSON.stringify(imageUrls) : undefined, // Lưu array URLs dưới dạng JSON string
                 ch_status: 'send',
                 ch_wallet_id: walletId,
                 ch_lang: lang
@@ -138,11 +144,13 @@ export class ChatsService implements OnModuleInit {
                 chat_id: chatHistory.ch_chat_id,
                 ch_wallet_address: wallet.wallet_solana_address,
                 ch_content: chatHistory.ch_content,
+                ch_image_list: isImageMessage ? imageUrls : undefined, // Trả về array URLs
                 chat_type: chat.chat_type,
                 ch_status: chatHistory.ch_status,
                 ch_lang: chatHistory.ch_lang,
                 country: wallet.wallet_country,
                 nick_name: wallet.wallet_nick_name,
+                message_type: messageType, // Thêm loại tin nhắn
                 createdAt: (chatHistory as any).createdAt
             };
 
@@ -155,7 +163,7 @@ export class ChatsService implements OnModuleInit {
         }
     }
 
-    async sendMessageToAll(content: string, walletId: number, lang: string = 'kr'): Promise<any> {
+    async sendMessageToAll(content: string, walletId: number, lang: string = 'kr', imageUrls?: string[]): Promise<any> {
         try {
             const chat = await this.createChatAll();
             const wallet = await this.listWalletRepository.findOne({
@@ -166,11 +174,15 @@ export class ChatsService implements OnModuleInit {
                 throw new Error('Wallet not found');
             }
 
+            // Xác định loại tin nhắn
+            const isImageMessage = imageUrls && imageUrls.length > 0;
+            const messageType = isImageMessage ? 'image' : 'text';
+
             const chatHistory = await this.chatHistoryModel.create({
                 ch_id: `${new Date().getTime()}-${Math.floor(Math.random() * 1000)}`,
                 ch_chat_id: chat.chat_id,
-                ch_content: content,
-                ch_type: 'text',
+                ch_content: content || '', // Text content (có thể là caption cho hình ảnh)
+                ch_image_list: isImageMessage ? JSON.stringify(imageUrls) : undefined, // Lưu array URLs dưới dạng JSON string
                 ch_status: 'send',
                 ch_wallet_id: walletId,
                 ch_lang: lang
@@ -182,11 +194,13 @@ export class ChatsService implements OnModuleInit {
                 chat_id: chatHistory.ch_chat_id,
                 ch_wallet_address: wallet.wallet_solana_address,
                 ch_content: chatHistory.ch_content,
+                ch_image_list: isImageMessage ? imageUrls : undefined, // Trả về array URLs
                 chat_type: chat.chat_type,
                 ch_status: chatHistory.ch_status,
                 ch_lang: chatHistory.ch_lang,
                 country: wallet.wallet_country,
                 nick_name: wallet.wallet_nick_name,
+                message_type: messageType, // Thêm loại tin nhắn để frontend biết cách hiển thị
                 createdAt: (chatHistory as any).createdAt
             };
 
@@ -239,6 +253,22 @@ export class ChatsService implements OnModuleInit {
                 histories: histories.map(history => {
                     const historyObj = history.toObject();
                     const walletInfo = walletMap.get(historyObj.ch_wallet_id) || { address: '', country: null, nick_name: '' };
+                    
+                    // Xác định loại tin nhắn
+                    const isImageMessage = historyObj.ch_image_list && historyObj.ch_image_list.trim() !== '';
+                    const messageType = isImageMessage ? 'image' : 'text';
+                    
+                    // Parse image URLs từ JSON string
+                    let imageList: string[] | null = null;
+                    if (isImageMessage) {
+                        try {
+                            imageList = JSON.parse(historyObj.ch_image_list);
+                        } catch (error) {
+                            // Nếu parse lỗi, có thể là URL đơn lẻ (tương thích ngược)
+                            imageList = [historyObj.ch_image_list];
+                        }
+                    }
+                    
                     return {
                         _id: historyObj._id,
                         ch_id: historyObj.ch_id,
@@ -246,11 +276,13 @@ export class ChatsService implements OnModuleInit {
                         chat_type: chat.chat_type,
                         ch_wallet_address: walletInfo.address,
                         ch_content: historyObj.ch_content,
+                        ch_image_list: imageList, // Trả về array URLs
                         ch_status: historyObj.ch_status,
                         ch_is_master: historyObj.ch_is_master,
                         ch_lang: historyObj.ch_lang,
                         country: walletInfo.country,
                         nick_name: walletInfo.nick_name,
+                        message_type: messageType, // Thêm loại tin nhắn
                         createdAt: historyObj.createdAt
                     };
                 }),
@@ -302,18 +334,36 @@ export class ChatsService implements OnModuleInit {
                 histories: histories.map(history => {
                     const historyObj = history.toObject();
                     const walletInfo = walletMap.get(historyObj.ch_wallet_id) || { address: '', country: null, nick_name: '' };
+                    
+                    // Xác định loại tin nhắn
+                    const isImageMessage = historyObj.ch_image_list && historyObj.ch_image_list.trim() !== '';
+                    const messageType = isImageMessage ? 'image' : 'text';
+                    
+                    // Parse image URLs từ JSON string
+                    let imageList: string[] | null = null;
+                    if (isImageMessage) {
+                        try {
+                            imageList = JSON.parse(historyObj.ch_image_list);
+                        } catch (error) {
+                            // Nếu parse lỗi, có thể là URL đơn lẻ (tương thích ngược)
+                            imageList = [historyObj.ch_image_list];
+                        }
+                    }
+                    
                     return {
                         _id: historyObj._id,
                         ch_id: historyObj.ch_id,
                         chat_id: historyObj.ch_chat_id,
                         ch_wallet_address: walletInfo.address,
                         ch_content: historyObj.ch_content,
+                        ch_image_list: imageList, // Trả về array URLs
                         chat_type: chat.chat_type,
                         ch_status: historyObj.ch_status,
                         ch_is_master: historyObj.ch_is_master,
                         ch_lang: historyObj.ch_lang,
                         country: walletInfo.country,
                         nick_name: walletInfo.nick_name,
+                        message_type: messageType, // Thêm loại tin nhắn
                         createdAt: historyObj.createdAt
                     };
                 }),
@@ -381,7 +431,7 @@ export class ChatsService implements OnModuleInit {
         }
     }
 
-    async sendMessageToGroup(groupId: number, content: string, walletId: number, lang: string = 'kr'): Promise<any> {
+    async sendMessageToGroup(groupId: number, content: string, walletId: number, lang: string = 'kr', imageUrls?: string[]): Promise<any> {
         try {
             // Kiểm tra quyền truy cập
             const { isMaster, isMember } = await this.checkGroupAuth(groupId, walletId);
@@ -402,12 +452,16 @@ export class ChatsService implements OnModuleInit {
                 throw new Error('Wallet not found');
             }
 
+            // Xác định loại tin nhắn
+            const isImageMessage = imageUrls && imageUrls.length > 0;
+            const messageType = isImageMessage ? 'image' : 'text';
+
             // Tạo chat history với ch_is_master dựa trên isMaster
             const chatHistory = await this.chatHistoryModel.create({
                 ch_id: `${new Date().getTime()}-${Math.floor(Math.random() * 1000)}`,
                 ch_chat_id: chat.chat_id,
-                ch_content: content,
-                ch_type: 'text',
+                ch_content: content || '', // Text content (có thể là caption cho hình ảnh)
+                ch_image_list: isImageMessage ? JSON.stringify(imageUrls) : undefined, // Lưu array URLs dưới dạng JSON string
                 ch_status: 'send',
                 ch_wallet_id: walletId,
                 ch_is_master: isMaster,
@@ -421,12 +475,14 @@ export class ChatsService implements OnModuleInit {
                 chat_id: chatHistory.ch_chat_id,
                 ch_wallet_address: wallet.wallet_solana_address,
                 ch_content: chatHistory.ch_content,
+                ch_image_list: isImageMessage ? imageUrls : undefined, // Trả về array URLs
                 chat_type: chat.chat_type,
                 ch_status: chatHistory.ch_status,
                 ch_is_master: chatHistory.ch_is_master,
                 ch_lang: chatHistory.ch_lang,
                 country: wallet.wallet_country,
                 nick_name: wallet.wallet_nick_name,
+                message_type: messageType, // Thêm loại tin nhắn
                 createdAt: (chatHistory as any).createdAt
             };
 
@@ -490,18 +546,36 @@ export class ChatsService implements OnModuleInit {
                 histories: histories.map(history => {
                     const historyObj = history.toObject();
                     const walletInfo = walletMap.get(historyObj.ch_wallet_id) || { address: '', country: null, nick_name: '' };
+                    
+                    // Xác định loại tin nhắn
+                    const isImageMessage = historyObj.ch_image_list && historyObj.ch_image_list.trim() !== '';
+                    const messageType = isImageMessage ? 'image' : 'text';
+                    
+                    // Parse image URLs từ JSON string
+                    let imageList: string[] | null = null;
+                    if (isImageMessage) {
+                        try {
+                            imageList = JSON.parse(historyObj.ch_image_list);
+                        } catch (error) {
+                            // Nếu parse lỗi, có thể là URL đơn lẻ (tương thích ngược)
+                            imageList = [historyObj.ch_image_list];
+                        }
+                    }
+                    
                     return {
                         _id: historyObj._id,
                         ch_id: historyObj.ch_id,
                         chat_id: historyObj.ch_chat_id,
                         ch_wallet_address: walletInfo.address,
                         ch_content: historyObj.ch_content,
+                        ch_image_list: imageList, // Trả về array URLs
                         chat_type: chat.chat_type,
                         ch_status: historyObj.ch_status,
                         ch_is_master: historyObj.ch_is_master,
                         ch_lang: historyObj.ch_lang,
                         country: walletInfo.country,
                         nick_name: walletInfo.nick_name,
+                        message_type: messageType, // Thêm loại tin nhắn
                         createdAt: historyObj.createdAt
                     };
                 }),
@@ -692,6 +766,15 @@ export class ChatsService implements OnModuleInit {
             return await this.updateLastRead(walletId, groupChat.chat_id);
         } catch (error) {
             this.logger.error(`Error marking group messages as read for wallet ${walletId} and group ${groupId}:`, error);
+            throw error;
+        }
+    }
+
+    async uploadImageToCloudinary(file: Express.Multer.File): Promise<any> {
+        try {
+            return await this.cloudinaryService.uploadImage(file);
+        } catch (error) {
+            this.logger.error('Error uploading image to Cloudinary:', error);
             throw error;
         }
     }
