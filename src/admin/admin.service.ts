@@ -356,7 +356,8 @@ export class AdminService implements OnModuleInit {
     limit: number = 100,
     search?: string,
     wallet_auth?: string,
-    wallet_type?: 'main' | 'all'
+    wallet_type?: 'main' | 'all',
+    currentUser?: UserAdmin
   ): Promise<{ data: ListWallet[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
     const skip = (page - 1) * limit;
     
@@ -371,12 +372,21 @@ export class AdminService implements OnModuleInit {
         'wallet.wallet_status',
         'wallet.wallet_nick_name',
         'wallet.wallet_country',
+        'wallet.wallet_code_ref',
+        'wallet.isBittworld',
         'wallet_auths'
       ]);
 
     // Build where conditions
     const whereConditions: string[] = [];
     const parameters: any = {};
+
+    // Kiểm tra role của user hiện tại
+    if (currentUser && currentUser.role === AdminRole.PARTNER) {
+      // Nếu role là PARTNER, chỉ lấy những ví có isBittworld = true
+      whereConditions.push('wallet.isBittworld = :isBittworld');
+      parameters['isBittworld'] = true;
+    }
 
     if (search) {
       whereConditions.push('(wallet.wallet_nick_name ILIKE :search OR CAST(wallet.wallet_id AS TEXT) ILIKE :search OR wallet.wallet_solana_address ILIKE :search)');
@@ -681,7 +691,8 @@ export class AdminService implements OnModuleInit {
   async createBgAffiliate(data: {
     walletId: number;
     totalCommissionPercent: number;
-  }): Promise<{ message: string; treeId: number; totalCommissionPercent: number }> {
+    batAlias: string;
+  }): Promise<{ message: string; treeId: number; totalCommissionPercent: number; batAlias: string }> {
     // Kiểm tra wallet có tồn tại không
     const wallet = await this.listWalletRepository.findOne({
       where: { wallet_id: data.walletId }
@@ -708,16 +719,23 @@ export class AdminService implements OnModuleInit {
       throw new BadRequestException('Commission percent phải từ 0 đến 100');
     }
 
+    // Kiểm tra bat_alias không được rỗng
+    if (!data.batAlias || data.batAlias.trim() === '') {
+      throw new BadRequestException('batAlias không được để trống');
+    }
+
     // Tạo cây affiliate mới
     const tree = await this.bgRefService.createAffiliateTree(
       data.walletId,
-      data.totalCommissionPercent
+      data.totalCommissionPercent,
+      data.batAlias
     );
 
     return {
       message: 'Tạo BG affiliate thành công',
       treeId: tree.bat_id,
-      totalCommissionPercent: data.totalCommissionPercent
+      totalCommissionPercent: data.totalCommissionPercent,
+      batAlias: tree.bat_alias
     };
   }
 
@@ -729,6 +747,7 @@ export class AdminService implements OnModuleInit {
     rootWalletId?: number;
     treeId?: number;
     newPercent: number;
+    batAlias?: string;
   }): Promise<{ 
     success: boolean;
     message: string;
@@ -737,32 +756,55 @@ export class AdminService implements OnModuleInit {
     minRequiredPercent: number | null;
     treeInfo: any;
   }> {
-    // Ưu tiên sử dụng rootWalletId nếu có
+    // Cập nhật commission
+    let result;
     if (data.rootWalletId) {
-      return await this.bgRefService.adminUpdateRootBgCommission(data.rootWalletId, data.newPercent);
+      result = await this.bgRefService.adminUpdateRootBgCommission(data.rootWalletId, data.newPercent);
+    } else if (data.treeId) {
+      result = await this.bgRefService.adminUpdateRootBgCommissionByTreeId(data.treeId, data.newPercent);
+    } else {
+      throw new BadRequestException('Phải cung cấp rootWalletId hoặc treeId');
     }
-    
-    // Fallback về treeId nếu không có rootWalletId
-    if (data.treeId) {
-      return await this.bgRefService.adminUpdateRootBgCommissionByTreeId(data.treeId, data.newPercent);
+
+    // Cập nhật alias nếu có
+    if (data.batAlias) {
+      const treeId = data.treeId || result.treeInfo.treeId;
+      const tree = await this.bgRefService['bgAffiliateTreeRepository'].findOne({
+        where: { bat_id: treeId }
+      });
+      if (tree) {
+        // Cập nhật bat_alias trong bg_affiliate_trees
+        tree.bat_alias = data.batAlias.trim();
+        await this.bgRefService['bgAffiliateTreeRepository'].save(tree);
+        result.treeInfo.bat_alias = tree.bat_alias;
+
+        // Cập nhật bg_alias trong bg_affiliate_nodes (root node)
+        const rootNode = await this.bgRefService['bgAffiliateNodeRepository'].findOne({
+          where: { ban_wallet_id: tree.bat_root_wallet_id, ban_tree_id: treeId }
+        });
+        if (rootNode) {
+          rootNode.bg_alias = data.batAlias.trim();
+          await this.bgRefService['bgAffiliateNodeRepository'].save(rootNode);
+        }
+      }
     }
-    
-    throw new BadRequestException('Phải cung cấp rootWalletId hoặc treeId');
+
+    return result;
   }
 
   /**
    * Lấy danh sách tất cả BG affiliate trees
    */
-  async getAllBgAffiliateTrees(): Promise<any[]> {
+  async getAllBgAffiliateTrees(currentUser?: UserAdmin): Promise<any[]> {
     const trees = await this.bgRefService.getAllBgAffiliateTrees();
     
     // Format dữ liệu để trả về với thông tin wallet
-    const treesWithWalletInfo = await Promise.all(
+    let treesWithWalletInfo = await Promise.all(
       trees.map(async (tree) => {
         // Lấy thông tin root wallet
         const rootWallet = await this.listWalletRepository.findOne({
           where: { wallet_id: tree.bat_root_wallet_id },
-          select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address']
+          select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address', 'isBittworld']
         });
 
         // Tìm root node để lấy status
@@ -777,9 +819,11 @@ export class AdminService implements OnModuleInit {
             walletId: rootWallet.wallet_id,
             solanaAddress: rootWallet.wallet_solana_address,
             nickName: rootWallet.wallet_nick_name,
-            ethAddress: rootWallet.wallet_eth_address
+            ethAddress: rootWallet.wallet_eth_address,
+            isBittworld: rootWallet.isBittworld
           } : null,
           totalCommissionPercent: tree.bat_total_commission_percent,
+          batAlias: tree.bat_alias,
           createdAt: tree.bat_created_at,
           nodeCount: tree.nodes?.length || 0,
           totalMembers: this.countTotalMembers(treeStructure),
@@ -787,6 +831,14 @@ export class AdminService implements OnModuleInit {
         };
       })
     );
+
+    // Kiểm tra role của user hiện tại
+    if (currentUser && currentUser.role === AdminRole.PARTNER) {
+      // Nếu role là PARTNER, chỉ lấy những trees có root wallet với isBittworld = true
+      treesWithWalletInfo = treesWithWalletInfo.filter(tree => 
+        tree.rootWallet && tree.rootWallet.isBittworld === true
+      );
+    }
     
     return treesWithWalletInfo;
   }
@@ -859,6 +911,7 @@ export class AdminService implements OnModuleInit {
       treeInfo: {
         treeId: tree.bat_id,
         totalCommissionPercent: tree.bat_total_commission_percent,
+        batAlias: tree.bat_alias,
         createdAt: tree.bat_created_at
       },
       downlineStructure: treeStructure,
@@ -915,6 +968,7 @@ export class AdminService implements OnModuleInit {
       treeInfo: {
         treeId: tree.bat_id,
         totalCommissionPercent: tree.bat_total_commission_percent,
+        batAlias: tree.bat_alias,
         createdAt: tree.bat_created_at
       },
       downlineStructure: downlineStructure,

@@ -21,6 +21,9 @@ export class BgAffiliateTree {
   })
   bat_total_commission_percent: number;
 
+  @Column({ name: 'bat_alias', type: 'varchar', length: 255, nullable: true })
+  bat_alias: string;
+
   @CreateDateColumn({ name: 'bat_created_at' })
   bat_created_at: Date;
 

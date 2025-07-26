@@ -36,6 +36,9 @@ export class BgAffiliateNode {
   })
   ban_status: boolean;
 
+  @Column({ name: 'bg_alias', type: 'varchar', length: 255, nullable: true })
+  bg_alias: string;
+
   // Foreign key references:
   // Ref: bg_affiliate_nodes.ban_tree_id > bg_affiliate_trees.bat_id
   // Ref: bg_affiliate_nodes.ban_wallet_id > list_wallets.wallet_id

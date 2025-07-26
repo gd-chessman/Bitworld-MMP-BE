@@ -29,7 +29,7 @@ export class BgRefService {
   /**
    * Tạo cây affiliate mới cho BG
    */
-  async createAffiliateTree(rootWalletId: number, totalCommissionPercent: number = 70.00): Promise<BgAffiliateTree> {
+  async createAffiliateTree(rootWalletId: number, totalCommissionPercent: number = 70.00, bat_alias: string): Promise<BgAffiliateTree> {
     // Kiểm tra xem wallet đã có cây affiliate chưa
     const existingTree = await this.bgAffiliateTreeRepository.findOne({
       where: { bat_root_wallet_id: rootWalletId }
@@ -43,6 +43,7 @@ export class BgRefService {
     const tree = this.bgAffiliateTreeRepository.create({
       bat_root_wallet_id: rootWalletId,
       bat_total_commission_percent: totalCommissionPercent,
+      bat_alias: bat_alias,
     });
 
     const savedTree = await this.bgAffiliateTreeRepository.save(tree);

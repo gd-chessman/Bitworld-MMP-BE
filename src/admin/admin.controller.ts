@@ -183,13 +183,14 @@ export class AdminController {
   @ApiOperation({ summary: 'Get list of user wallets' })
   @ApiResponse({ status: 200, description: 'Returns list of user wallets with pagination' })
   async getListWallets(
+    @Request() req: any,
     @Query('page', new ParseIntPipe({ optional: true })) page: number = 1,
     @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 100,
     @Query('search') search?: string,
     @Query('wallet_auth') wallet_auth?: string,
     @Query('wallet_type') wallet_type?: 'main' | 'all'
   ): Promise<{ data: ListWallet[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
-    return this.adminService.getListWallets(page, limit, search, wallet_auth, wallet_type);
+    return this.adminService.getListWallets(page, limit, search, wallet_auth, wallet_type, req.user);
   }
 
   @UseGuards(JwtAuthAdminGuard)
@@ -264,8 +265,9 @@ export class AdminController {
     @Body() data: {
       walletId: number;
       totalCommissionPercent: number;
+      batAlias: string;
     }
-  ): Promise<{ message: string; treeId: number; totalCommissionPercent: number; walletInfo: any }> {
+  ): Promise<{ message: string; treeId: number; totalCommissionPercent: number; batAlias: string; walletInfo: any }> {
     const result = await this.adminService.createBgAffiliate(data);
     
     // Lấy thông tin wallet để trả về
@@ -286,6 +288,7 @@ export class AdminController {
       rootWalletId?: number;
       treeId?: number;
       newPercent: number;
+      batAlias?: string;
     }
   ): Promise<{ 
     success: boolean;
@@ -302,8 +305,8 @@ export class AdminController {
   @Get('bg-affiliate/trees')
   @ApiOperation({ summary: 'Get all BG affiliate trees' })
   @ApiResponse({ status: 200, description: 'Returns list of BG affiliate trees' })
-  async getAllBgAffiliateTrees(): Promise<any[]> {
-    return this.adminService.getAllBgAffiliateTrees();
+  async getAllBgAffiliateTrees(@Request() req: any): Promise<any[]> {
+    return this.adminService.getAllBgAffiliateTrees(req.user);
   }
 
   @UseGuards(JwtAuthAdminGuard)
