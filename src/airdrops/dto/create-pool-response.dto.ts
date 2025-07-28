@@ -27,6 +27,7 @@ export class CreatePoolResponseDto {
         poolId: number;
         name: string;
         slug: string;
+        logo: string;
         status: string;
         initialAmount: number;
         transactionHash?: string;

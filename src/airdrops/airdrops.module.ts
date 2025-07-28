@@ -9,6 +9,7 @@ import { AirdropsService } from './services/airdrops.service';
 import { AirdropJwtAuthGuard } from './guards/airdrop-jwt-auth.guard';
 import { SolanaModule } from '../solana/solana.module';
 import { SharedModule } from '../shared/shared.module';
+import { CloudinaryModule } from '../common/cloudinary/cloudinary.module';
 
 @Module({
   imports: [
@@ -19,7 +20,8 @@ import { SharedModule } from '../shared/shared.module';
     ]),
     ConfigModule,
     SolanaModule,
-    SharedModule
+    SharedModule,
+    CloudinaryModule
   ],
   controllers: [AirdropsController],
   providers: [AirdropsService, AirdropJwtAuthGuard],

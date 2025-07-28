@@ -1,5 +1,6 @@
-import { Controller, Post, Get, Body, UseGuards, Request, HttpStatus, Param, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
+import { Controller, Post, Get, Body, UseGuards, Request, HttpStatus, Param, Query, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiConsumes } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { AirdropJwtAuthGuard } from '../guards/airdrop-jwt-auth.guard';
 import { AirdropsService } from '../services/airdrops.service';
@@ -20,10 +21,12 @@ export class AirdropsController {
     constructor(private readonly airdropsService: AirdropsService) {}
 
     @Post('create-pool')
+    @UseInterceptors(FileInterceptor('logo'))
     @ApiOperation({
         summary: 'Tạo airdrop pool mới',
-        description: 'Tạo một airdrop pool mới với token X. Yêu cầu số lượng tối thiểu 1,000,000 token X.'
+        description: 'Tạo một airdrop pool mới với token X. Hỗ trợ upload logo file hoặc URL. Yêu cầu số lượng tối thiểu 1,000,000 token X.'
     })
+    @ApiConsumes('multipart/form-data')
     @ApiResponse({
         status: HttpStatus.OK,
         description: 'Tạo pool thành công',
@@ -41,7 +44,11 @@ export class AirdropsController {
         status: HttpStatus.INTERNAL_SERVER_ERROR,
         description: 'Lỗi server'
     })
-    async createPool(@Request() req: any, @Body() createPoolDto: CreatePoolDto) {
+    async createPool(
+        @Request() req: any, 
+        @Body() createPoolDto: CreatePoolDto,
+        @UploadedFile() logoFile?: Express.Multer.File
+    ) {
         // Lấy wallet_id từ JWT token
         const walletId = req.user.wallet_id;
         
@@ -49,7 +56,7 @@ export class AirdropsController {
             throw new Error('Không tìm thấy wallet_id trong token');
         }
 
-        return await this.airdropsService.createPool(walletId, createPoolDto);
+        return await this.airdropsService.createPool(walletId, createPoolDto, logoFile);
     }
 
     @Post('stake-pool')
@@ -88,7 +95,7 @@ export class AirdropsController {
     @Get('pools')
     @ApiOperation({
         summary: 'Lấy danh sách airdrop pools',
-        description: 'Lấy danh sách tất cả các airdrop pools đang hoạt động với thông tin chi tiết. Hỗ trợ sắp xếp theo nhiều trường.'
+        description: 'Lấy danh sách airdrop pools với bộ lọc và sắp xếp. Hỗ trợ lọc theo: tất cả pools, pools đã tạo, pools đã tham gia.'
     })
     @ApiResponse({
         status: HttpStatus.OK,

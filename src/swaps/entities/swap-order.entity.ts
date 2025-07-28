@@ -5,9 +5,11 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   ManyToOne,
+  OneToMany,
   JoinColumn,
 } from 'typeorm';
 import { ListWallet } from '../../telegram-wallets/entities/list-wallet.entity';
+import { SwapInvestorReward } from './swap-investor-reward.entity';
 
 export enum SwapOrderStatus {
   PENDING = 'pending',
@@ -105,4 +107,8 @@ export class SwapOrder {
   @ManyToOne(() => ListWallet, wallet => wallet.swapOrders)
   @JoinColumn({ name: 'wallet_id' })
   wallet: ListWallet;
+
+  // One-to-many relationship with SwapInvestorReward
+  @OneToMany(() => SwapInvestorReward, reward => reward.swapOrder)
+  investorRewards: SwapInvestorReward[];
 } 

@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsNotEmpty, Min, IsOptional } from 'class-validator';
+import { IsString, IsNumber, IsNotEmpty, Min, IsOptional, IsUrl } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreatePoolDto {
@@ -11,12 +11,14 @@ export class CreatePoolDto {
     name: string;
 
     @ApiProperty({
-        description: 'Logo URL của pool',
-        example: 'https://example.com/logo.png'
+        description: 'Logo URL của pool (hỗ trợ URL hoặc file upload)',
+        example: 'https://example.com/logo.png',
+        required: false
     })
+    @IsOptional()
     @IsString()
-    @IsNotEmpty()
-    logo: string;
+    @IsUrl({}, { message: 'Logo phải là URL hợp lệ' })
+    logo?: string;
 
     @ApiProperty({
         description: 'Mô tả chi tiết về pool',

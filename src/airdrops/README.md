@@ -18,6 +18,7 @@ Bảng lưu thông tin các airdrop pools
 | alp_name | VARCHAR(255) | NO | - | Tên pool |
 | alp_slug | VARCHAR(255) | NO | - | Slug của pool |
 | alp_describe | VARCHAR(1000) | YES | - | Mô tả pool |
+| alp_logo | VARCHAR(500) | YES | - | Logo URL của pool |
 | alp_member_num | INTEGER | NO | 0 | Số lượng thành viên |
 | apl_volume | DECIMAL(18,6) | NO | 0 | Tổng volume |
 | apl_creation_date | TIMESTAMP | NO | CURRENT_TIMESTAMP | Thời gian tạo |
@@ -180,7 +181,7 @@ Authorization: Bearer <jwt_token>
 Content-Type: application/json
 ```
 
-**Request Body:**
+**Request Body (JSON):**
 ```json
 {
   "name": "My Airdrop Pool",
@@ -188,6 +189,14 @@ Content-Type: application/json
   "describe": "Mô tả chi tiết về pool",
   "initialAmount": 1000000
 }
+```
+
+**Request Body (Form Data - với file upload):**
+```
+name: "My Airdrop Pool"
+logo: [file upload]
+describe: "Mô tả chi tiết về pool"
+initialAmount: 1000000
 ```
 
 **Response:**
@@ -199,6 +208,7 @@ Content-Type: application/json
     "poolId": 1,
     "name": "My Airdrop Pool",
     "slug": "my-airdrop-pool-1",
+    "logo": "https://res.cloudinary.com/.../airdrop-pool-logo.jpg",
     "status": "active",
     "initialAmount": 1000000,
     "transactionHash": "5J7X...abc123"
@@ -318,6 +328,10 @@ Content-Type: application/json
 ```
 
 **Query Parameters:**
+- `filterType` (optional): Bộ lọc loại pool
+  - `all`: Tất cả các pool (mặc định)
+  - `created`: Chỉ pools do user tạo
+  - `joined`: Chỉ pools mà user đã tham gia
 - `sortBy` (optional): Trường để sắp xếp danh sách pools
   - `creationDate`: Sắp xếp theo ngày tạo (mặc định)
   - `name`: Sắp xếp theo tên pool
@@ -357,14 +371,17 @@ Content-Type: application/json
 ```
 
 **Business Logic:**
-1. Lấy tất cả pools có trạng thái `active`
-2. Sắp xếp theo trường được chọn (mặc định: ngày tạo giảm dần)
-3. Với mỗi pool, kiểm tra thông tin stake của user:
+1. **Xác định filter type:**
+   - `all`: Lấy tất cả pools có trạng thái `active`
+   - `created`: Chỉ lấy pools do user tạo (alp_originator = wallet_id)
+   - `joined`: Lấy pools mà user đã tham gia (có record trong airdrop_pool_joins)
+2. **Sắp xếp theo trường được chọn** (mặc định: ngày tạo giảm dần)
+3. **Với mỗi pool, kiểm tra thông tin stake của user:**
    - Kiểm tra user có phải là creator không
    - Lấy tất cả stake records của user trong pool
    - Tính tổng volume user đã stake
    - Nếu là creator, cộng thêm volume ban đầu của pool
-4. Trả về thông tin pool kèm thông tin stake của user (nếu có)
+4. **Trả về thông tin pool kèm thông tin stake của user** (nếu có)
 
 **Sắp xếp Pools:**
 - Hỗ trợ sắp xếp theo:
@@ -523,6 +540,11 @@ WALLET_BITT=your_bittworld_wallet_address_here
 
 # Private key của wallet hỗ trợ phí SOL
 WALLET_SUP_FREE_PRIVATE_KEY=your_support_wallet_private_key_here
+
+# Cloudinary configuration (cho upload logo)
+CLOUDINARY_CLOUD_NAME=your_cloudinary_cloud_name
+CLOUDINARY_API_KEY=your_cloudinary_api_key
+CLOUDINARY_API_SECRET=your_cloudinary_api_secret
 ```
 
 ## Migration

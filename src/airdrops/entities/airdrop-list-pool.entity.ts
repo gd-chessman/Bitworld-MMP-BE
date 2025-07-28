@@ -26,6 +26,9 @@ export class AirdropListPool {
     @Column({ name: 'alp_describe', type: 'varchar', length: 1000, nullable: true })
     alp_describe: string;
 
+    @Column({ name: 'alp_logo', type: 'varchar', length: 500, nullable: true })
+    alp_logo: string;
+
     @Column({ name: 'alp_member_num', type: 'integer', default: 0 })
     alp_member_num: number;
 

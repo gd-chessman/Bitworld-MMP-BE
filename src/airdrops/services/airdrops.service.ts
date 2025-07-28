@@ -1,6 +1,6 @@
 import { Injectable, Logger, BadRequestException, HttpException, HttpStatus, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { AirdropListPool, AirdropPoolStatus } from '../entities/airdrop-list-pool.entity';
 import { AirdropPoolJoin, AirdropPoolJoinStatus } from '../entities/airdrop-pool-join.entity';
@@ -10,13 +10,14 @@ import { StakePoolDto } from '../dto/join-pool.dto';
 import { PoolInfoDto } from '../dto/get-pools-response.dto';
 import { PoolDetailDto, MemberInfoDto } from '../dto/get-pool-detail-response.dto';
 import { GetPoolDetailDto, SortField, SortOrder } from '../dto/get-pool-detail.dto';
-import { GetPoolsDto, PoolSortField, PoolSortOrder } from '../dto/get-pools.dto';
+import { GetPoolsDto, PoolSortField, PoolSortOrder, PoolFilterType } from '../dto/get-pools.dto';
 import { SolanaService } from '../../solana/solana.service';
 import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { getAssociatedTokenAddress as getATA } from '@project-serum/associated-token';
 import bs58 from 'bs58';
 import { RedisLockService } from '../../common/services/redis-lock.service';
+import { CloudinaryService } from '../../common/cloudinary/cloudinary.service';
 
 @Injectable()
 export class AirdropsService {
@@ -35,10 +36,11 @@ export class AirdropsService {
         private readonly solanaService: SolanaService,
         @Inject('SOLANA_CONNECTION')
         private readonly connection: Connection,
-        private readonly redisLockService: RedisLockService
+        private readonly redisLockService: RedisLockService,
+        private readonly cloudinaryService: CloudinaryService
     ) {}
 
-    async createPool(walletId: number, createPoolDto: CreatePoolDto) {
+    async createPool(walletId: number, createPoolDto: CreatePoolDto, logoFile?: Express.Multer.File) {
         // Tạo lock key để tránh trùng lặp API call
         const lockKey = `create_pool_${walletId}`;
         
@@ -119,7 +121,21 @@ export class AirdropsService {
                 }
             }
 
-            // 6. Tạo pool với trạng thái pending (tạm thời không có slug)
+            // 6. Xử lý logo
+            let logoUrl = createPoolDto.logo || '';
+            
+            if (logoFile) {
+                try {
+                    // Upload file lên Cloudinary sử dụng CloudinaryService
+                    logoUrl = await this.cloudinaryService.uploadAirdropLogo(logoFile);
+                    this.logger.log(`Logo uploaded successfully: ${logoUrl}`);
+                } catch (error) {
+                    this.logger.error(`Error uploading logo: ${error.message}`);
+                    throw new BadRequestException('Không thể upload logo. Vui lòng thử lại.');
+                }
+            }
+
+            // 7. Tạo pool với trạng thái pending (tạm thời không có slug)
             const currentDate = new Date();
             const endDate = new Date(currentDate.getTime() + (365 * 24 * 60 * 60 * 1000)); // +365 ngày
             
@@ -128,6 +144,7 @@ export class AirdropsService {
                 alp_name: createPoolDto.name,
                 alp_slug: '', // Sẽ cập nhật sau khi có ID
                 alp_describe: createPoolDto.describe || '',
+                alp_logo: logoUrl,
                 alp_member_num: 0,
                 apl_volume: createPoolDto.initialAmount,
                 apl_creation_date: currentDate,
@@ -228,6 +245,7 @@ export class AirdropsService {
                     poolId: savedPool.alp_id,
                     name: savedPool.alp_name,
                     slug: slug,
+                    logo: logoUrl,
                     status: finalStatus,
                     initialAmount: createPoolDto.initialAmount,
                     transactionHash: transactionHash
@@ -465,7 +483,8 @@ export class AirdropsService {
 
     async getPools(walletId: number, query: GetPoolsDto = {}): Promise<PoolInfoDto[]> {
         try {
-            // 1. Xác định trường sắp xếp
+            // 1. Xác định filter type và trường sắp xếp
+            const filterType = query.filterType || PoolFilterType.ALL;
             const sortBy = query.sortBy || PoolSortField.CREATION_DATE;
             const sortOrder = query.sortOrder || PoolSortOrder.DESC;
 
@@ -491,13 +510,55 @@ export class AirdropsService {
                     orderObject = { apl_creation_date: 'DESC' };
             }
 
-            // 3. Lấy tất cả pools đang hoạt động
-            const pools = await this.airdropListPoolRepository.find({
-                where: {
-                    apl_status: AirdropPoolStatus.ACTIVE
-                },
+            // 3. Tạo where condition dựa trên filter type
+            let whereCondition: any = {
+                apl_status: AirdropPoolStatus.ACTIVE
+            };
+
+            switch (filterType) {
+                case PoolFilterType.CREATED:
+                    // Chỉ lấy pools do user tạo
+                    whereCondition.alp_originator = walletId;
+                    break;
+                case PoolFilterType.JOINED:
+                    // Lấy pools mà user đã tham gia (không phải creator)
+                    // Sẽ xử lý sau khi lấy tất cả pools
+                    break;
+                case PoolFilterType.ALL:
+                default:
+                    // Lấy tất cả pools (mặc định)
+                    break;
+            }
+
+            // 4. Lấy pools theo điều kiện
+            let pools = await this.airdropListPoolRepository.find({
+                where: whereCondition,
                 order: orderObject
             });
+
+            // 5. Nếu filter là JOINED, lọc thêm pools mà user đã tham gia
+            if (filterType === PoolFilterType.JOINED) {
+                const joinedPoolIds = await this.airdropPoolJoinRepository
+                    .createQueryBuilder('join')
+                    .select('join.apj_pool_id')
+                    .where('join.apj_member = :walletId', { walletId })
+                    .andWhere('join.apj_status = :status', { status: AirdropPoolJoinStatus.ACTIVE })
+                    .getRawMany();
+
+                const joinedIds = joinedPoolIds.map(item => item.join_apj_pool_id);
+                
+                if (joinedIds.length > 0) {
+                    pools = await this.airdropListPoolRepository.find({
+                        where: {
+                            alp_id: In(joinedIds),
+                            apl_status: AirdropPoolStatus.ACTIVE
+                        },
+                        order: orderObject
+                    });
+                } else {
+                    pools = []; // Không có pool nào user đã tham gia
+                }
+            }
 
             const poolsWithUserInfo: PoolInfoDto[] = [];
 
@@ -530,7 +591,7 @@ export class AirdropsService {
                     poolId: pool.alp_id,
                     name: pool.alp_name,
                     slug: pool.alp_slug,
-                    logo: '', // Cần thêm field logo vào entity nếu cần
+                    logo: pool.alp_logo || '',
                     describe: pool.alp_describe || '',
                     memberCount: pool.alp_member_num,
                     totalVolume: Number(pool.apl_volume),
@@ -637,7 +698,7 @@ export class AirdropsService {
                 poolId: pool.alp_id,
                 name: pool.alp_name,
                 slug: pool.alp_slug,
-                logo: '', // Cần thêm field logo vào entity nếu cần
+                logo: pool.alp_logo || '',
                 describe: pool.alp_describe || '',
                 memberCount: pool.alp_member_num,
                 totalVolume: Number(pool.apl_volume),
