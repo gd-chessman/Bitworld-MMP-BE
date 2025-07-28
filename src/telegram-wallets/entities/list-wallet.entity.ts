@@ -9,6 +9,7 @@ import { BgAffiliateCommissionLog } from '../../referral/entities/bg-affiliate-c
 import { BgAffiliateCommissionReward } from '../../referral/entities/bg-affiliate-commission-reward.entity';
 import { RefWithdrawHistory } from '../../referral/entities/ref-withdraw-history.entity';
 import { TradingOrder } from '../../trade/entities/trading-order.entity';
+import { SwapOrder } from '../../swap/entities/swap-order.entity';
 
 @Entity('list_wallets')
 export class ListWallet {
@@ -119,6 +120,10 @@ export class ListWallet {
     // Referral withdraw history relationship
     @OneToMany(() => RefWithdrawHistory, withdrawHistory => withdrawHistory.wallet)
     refWithdrawHistories: RefWithdrawHistory[];
+
+    // Swap relationships
+    @OneToMany(() => SwapOrder, swapOrder => swapOrder.wallet)
+    swapOrders: SwapOrder[];
 
     @BeforeInsert()
     async setInitialId() {

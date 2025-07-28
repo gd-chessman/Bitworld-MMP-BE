@@ -188,9 +188,10 @@ export class AdminController {
     @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 100,
     @Query('search') search?: string,
     @Query('wallet_auth') wallet_auth?: string,
-    @Query('wallet_type') wallet_type?: 'main' | 'all'
+    @Query('wallet_type') wallet_type?: 'main' | 'all',
+    @Query('isBittworld') isBittworld?: string
   ): Promise<{ data: ListWallet[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
-    return this.adminService.getListWallets(page, limit, search, wallet_auth, wallet_type, req.user);
+    return this.adminService.getListWallets(page, limit, search, wallet_auth, wallet_type, req.user, isBittworld);
   }
 
   @UseGuards(JwtAuthAdminGuard)

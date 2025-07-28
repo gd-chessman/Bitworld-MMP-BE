@@ -357,7 +357,8 @@ export class AdminService implements OnModuleInit {
     search?: string,
     wallet_auth?: string,
     wallet_type?: 'main' | 'all',
-    currentUser?: UserAdmin
+    currentUser?: UserAdmin,
+    isBittworld?: string
   ): Promise<{ data: ListWallet[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
     const skip = (page - 1) * limit;
     
@@ -384,8 +385,16 @@ export class AdminService implements OnModuleInit {
     // Kiểm tra role của user hiện tại
     if (currentUser && currentUser.role === AdminRole.PARTNER) {
       // Nếu role là PARTNER, chỉ lấy những ví có isBittworld = true
+      // Bỏ qua filter isBittworld từ user nếu có
       whereConditions.push('wallet.isBittworld = :isBittworld');
       parameters['isBittworld'] = true;
+    } else {
+      // Role khác (ADMIN, MEMBER) - cho phép filter isBittworld
+      if (isBittworld !== undefined && isBittworld !== '') {
+        const isBittworldBool = isBittworld.toLowerCase() === 'true';
+        whereConditions.push('wallet.isBittworld = :isBittworld');
+        parameters['isBittworld'] = isBittworldBool;
+      }
     }
 
     if (search) {

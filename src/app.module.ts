@@ -28,6 +28,7 @@ import { ChatsModule } from './chats/chats.module';
 import { ReferralModule } from './referral/referral.module';
 import { DepositWithdrawModule } from './deposit-withdraw/deposit-withdraw.module';
 import { AdminModule } from './admin/admin.module';
+import { SwapModule } from './swap/swap.module';
 //import { ThrottlerModule } from '@nestjs/throttler';
 //import { RateLimitMiddleware } from './common/middleware/rate-limit.middleware';
 
@@ -83,6 +84,7 @@ initializeTransactionalContext();
     ChatsModule,
     ReferralModule,
     DepositWithdrawModule,
+    SwapModule,
     AdminModule,
     // ThrottlerModule.forRoot({
     //   throttlers: [{
