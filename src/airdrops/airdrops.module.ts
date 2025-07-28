@@ -6,7 +6,9 @@ import { AirdropPoolJoin } from './entities/airdrop-pool-join.entity';
 import { ListWallet } from '../telegram-wallets/entities/list-wallet.entity';
 import { AirdropsController } from './controllers/airdrops.controller';
 import { AirdropsService } from './services/airdrops.service';
+import { AirdropJwtAuthGuard } from './guards/airdrop-jwt-auth.guard';
 import { SolanaModule } from '../solana/solana.module';
+import { SharedModule } from '../shared/shared.module';
 
 @Module({
   imports: [
@@ -16,10 +18,11 @@ import { SolanaModule } from '../solana/solana.module';
       ListWallet
     ]),
     ConfigModule,
-    SolanaModule
+    SolanaModule,
+    SharedModule
   ],
   controllers: [AirdropsController],
-  providers: [AirdropsService],
+  providers: [AirdropsService, AirdropJwtAuthGuard],
   exports: [AirdropsService],
 })
 export class AirdropsModule {} 

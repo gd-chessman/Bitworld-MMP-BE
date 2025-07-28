@@ -253,6 +253,32 @@ export class BgRefController {
   }
 
   /**
+   * Hủy yêu cầu rút tiền BG affiliate đang pending
+   */
+  @UseGuards(JwtBgAuthGuard)
+  @Post('cancel-withdraw/:withdrawId')
+  async cancelWithdraw(
+    @Request() req: RequestWithUser,
+    @Param('withdrawId') withdrawId: number
+  ) {
+    const walletId = req.user?.wallet_id;
+    if (!walletId) {
+      throw new Error('Không tìm thấy thông tin ví trong token');
+    }
+
+    const result = await this.bgRefWithdrawService.cancelWithdrawRequest(walletId, withdrawId);
+    
+    return {
+      success: result.success,
+      message: result.message,
+      data: result.success ? {
+        withdrawId: result.withdrawId,
+        cancelledAt: result.cancelledAt
+      } : null
+    };
+  }
+
+  /**
    * Lấy lịch sử rút tiền BG affiliate
    */
   @UseGuards(JwtBgAuthGuard)
@@ -289,6 +315,49 @@ export class BgRefController {
       success: true,
       message: 'Lấy thông tin rút tiền BG affiliate khả dụng thành công',
       data: available
+    };
+  }
+
+  /**
+   * Lấy thông tin yêu cầu rút tiền đang pending
+   */
+  @UseGuards(JwtBgAuthGuard)
+  @Get('pending-withdrawal')
+  async getPendingWithdrawal(@Request() req: RequestWithUser) {
+    const walletId = req.user?.wallet_id;
+    if (!walletId) {
+      throw new Error('Không tìm thấy thông tin ví trong token');
+    }
+
+    const pending = await this.bgRefWithdrawService.getPendingWithdrawal(walletId);
+    
+    return {
+      success: true,
+      message: 'Lấy thông tin yêu cầu rút tiền đang chờ xử lý thành công',
+      data: pending
+    };
+  }
+
+  /**
+   * Lấy thông tin transaction status
+   */
+  @UseGuards(JwtBgAuthGuard)
+  @Get('transaction-status/:withdrawId')
+  async getTransactionStatus(
+    @Request() req: RequestWithUser,
+    @Param('withdrawId') withdrawId: number
+  ) {
+    const walletId = req.user?.wallet_id;
+    if (!walletId) {
+      throw new Error('Không tìm thấy thông tin ví trong token');
+    }
+
+    const status = await this.bgRefWithdrawService.getTransactionStatus(walletId, withdrawId);
+    
+    return {
+      success: true,
+      message: 'Lấy thông tin trạng thái giao dịch thành công',
+      data: status
     };
   }
 

@@ -22,6 +22,7 @@ import { WalletAuth } from '../telegram-wallets/entities/wallet-auth.entity';
 import { UserWallet } from '../telegram-wallets/entities/user-wallet.entity';
 import { TelegramWalletsModule } from '../telegram-wallets/telegram-wallets.module';
 import { SolanaModule } from '../solana/solana.module';
+import { SharedModule } from '../shared/shared.module';
 
 @Module({
   imports: [
@@ -45,7 +46,8 @@ import { SolanaModule } from '../solana/solana.module';
     HttpModule,
     ScheduleModule.forRoot(),
     forwardRef(() => TelegramWalletsModule),
-    forwardRef(() => SolanaModule)
+    forwardRef(() => SolanaModule),
+    SharedModule
   ],
   controllers: [BgRefController],
   providers: [

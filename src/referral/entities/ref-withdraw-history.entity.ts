@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, OneToMany, Index } from 'typeorm';
 import { ListWallet } from '../../telegram-wallets/entities/list-wallet.entity';
 import { WalletRefReward } from './wallet-ref-reward.entity';
 import { BgAffiliateCommissionReward } from './bg-affiliate-commission-reward.entity';
@@ -11,6 +11,7 @@ export enum WithdrawStatus {
 }
 
 @Entity('ref_withdraw_histories')
+@Index(['rwh_wallet_id', 'rwh_status'], { unique: true, where: "rwh_status = 'pending'" })
 export class RefWithdrawHistory {
   @PrimaryGeneratedColumn({ name: 'rwh_id' })
   rwh_id: number;
@@ -59,6 +60,21 @@ export class RefWithdrawHistory {
     nullable: false 
   })
   rwh_date: Date;
+
+  @Column({ 
+    name: 'rwh_retry_count', 
+    type: 'integer', 
+    default: 0,
+    nullable: false 
+  })
+  rwh_retry_count: number;
+
+  @Column({ 
+    name: 'rwh_next_retry_at', 
+    type: 'timestamp', 
+    nullable: true 
+  })
+  rwh_next_retry_at: Date | null;
 
   @CreateDateColumn({ name: 'rwh_created_at' })
   rwh_created_at: Date;

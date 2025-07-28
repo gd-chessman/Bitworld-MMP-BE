@@ -558,4 +558,10 @@ src/airdrops/
 
 4. **Entity Relationships:**
    - Đầy đủ bidirectional relationships
-   - Có thể query theo cả hai chiều 
+   - Có thể query theo cả hai chiều
+
+5. **Authentication:**
+   - Module sử dụng `AirdropJwtAuthGuard` thay vì `JwtAuthGuard` mặc định
+   - Guard này chỉ kiểm tra JWT token và wallet tồn tại, không kiểm tra mối quan hệ phức tạp trong `wallet_auth`
+   - Giải quyết vấn đề "Error validating wallet auth" khi JWT token hợp lệ nhưng không có record trong `wallet_auth`
+   - Đảm bảo tính bảo mật bằng cách kiểm tra wallet status và tồn tại 

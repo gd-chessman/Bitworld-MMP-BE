@@ -16,11 +16,13 @@ import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } f
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { getAssociatedTokenAddress as getATA } from '@project-serum/associated-token';
 import bs58 from 'bs58';
+import { RedisLockService } from '../../common/services/redis-lock.service';
 
 @Injectable()
 export class AirdropsService {
     private readonly logger = new Logger(AirdropsService.name);
     private readonly MAX_RETRY_ATTEMPTS = 3;
+    private readonly LOCK_TTL = 300; // 5 phút
 
     constructor(
         @InjectRepository(AirdropListPool)
@@ -32,14 +34,16 @@ export class AirdropsService {
         private readonly configService: ConfigService,
         private readonly solanaService: SolanaService,
         @Inject('SOLANA_CONNECTION')
-        private readonly connection: Connection
+        private readonly connection: Connection,
+        private readonly redisLockService: RedisLockService
     ) {}
 
     async createPool(walletId: number, createPoolDto: CreatePoolDto) {
-        // Tạo unique key để tránh trùng lặp
-        const uniqueKey = `create_pool_${walletId}_${Date.now()}`;
+        // Tạo lock key để tránh trùng lặp API call
+        const lockKey = `create_pool_${walletId}`;
         
-        try {
+        // Sử dụng withLock để tự động handle lock/release
+        return await this.redisLockService.withLock(lockKey, async () => {
             // 1. Kiểm tra số lượng khởi tạo tối thiểu
             if (createPoolDto.initialAmount < 1000000) {
                 throw new BadRequestException('Số lượng khởi tạo phải tối thiểu là 1,000,000');
@@ -166,11 +170,15 @@ export class AirdropsService {
                         break;
                     }
                     
+                    // Tạo unique transaction ID để tránh trùng lặp
+                    const transactionId = `pool_${savedPool.alp_id}_${Date.now()}_${Math.random()}`;
+                    
                     transactionHash = await this.transferTokenToBittWallet(
                         wallet.wallet_private_key,
                         mintTokenAirdrop,
                         walletBittAddress,
-                        createPoolDto.initialAmount
+                        createPoolDto.initialAmount,
+                        transactionId
                     );
 
                     // Chờ transaction được confirm
@@ -225,18 +233,15 @@ export class AirdropsService {
                     transactionHash: transactionHash
                 }
             };
-
-        } catch (error) {
-            this.logger.error(`Lỗi tạo pool: ${error.message}`);
-            throw error;
-        }
+        }, this.LOCK_TTL * 1000); // Convert to milliseconds
     }
 
     async stakePool(walletId: number, stakePoolDto: StakePoolDto) {
-        // Tạo unique key để tránh trùng lặp
-        const uniqueKey = `stake_pool_${walletId}_${stakePoolDto.poolId}_${Date.now()}`;
+        // Tạo lock key để tránh trùng lặp API call
+        const lockKey = `stake_pool_${walletId}_${stakePoolDto.poolId}`;
         
-        try {
+        // Sử dụng withLock để tự động handle lock/release
+        return await this.redisLockService.withLock(lockKey, async () => {
             // 1. Kiểm tra pool có tồn tại và đang active không
             const pool = await this.airdropListPoolRepository.findOne({
                 where: { alp_id: stakePoolDto.poolId }
@@ -379,11 +384,15 @@ export class AirdropsService {
                         break;
                     }
                     
+                    // Tạo unique transaction ID để tránh trùng lặp
+                    const transactionId = `stake_${savedJoin.apj_id}_${Date.now()}_${Math.random()}`;
+                    
                     transactionHash = await this.transferTokenToBittWallet(
                         wallet.wallet_private_key,
                         mintTokenAirdrop,
                         walletBittAddress,
-                        stakePoolDto.stakeAmount
+                        stakePoolDto.stakeAmount,
+                        transactionId
                     );
 
                     // Chờ transaction được confirm
@@ -452,11 +461,7 @@ export class AirdropsService {
                     transactionHash: transactionHash === 'already_processed' ? null : transactionHash
                 }
             };
-
-        } catch (error) {
-            this.logger.error(`Lỗi stake pool: ${error.message}`);
-            throw error;
-        }
+        }, this.LOCK_TTL * 1000); // Convert to milliseconds
     }
 
     async getPools(walletId: number, query: GetPoolsDto = {}): Promise<PoolInfoDto[]> {
@@ -763,14 +768,15 @@ export class AirdropsService {
         privateKey: string,
         tokenMint: string,
         destinationWallet: string,
-        amount: number
+        amount: number,
+        transactionId?: string
     ): Promise<string> {
         try {
             // Decode private key
             const keypair = this.getKeypairFromPrivateKey(privateKey);
             
             // Tạo unique transaction để tránh trùng lặp
-            const uniqueId = Date.now() + Math.random();
+            const uniqueId = transactionId || `${Date.now()}_${Math.random()}`;
             
             // Get token accounts
             const sourceTokenAccount = await getATA(
@@ -803,7 +809,7 @@ export class AirdropsService {
             transaction.sign(keypair);
             const signature = await this.connection.sendTransaction(transaction, [keypair]);
             
-            this.logger.log(`Đã gửi transaction BITT với signature: ${signature}, uniqueId: ${uniqueId}`);
+            this.logger.log(`Đã gửi transaction BITT với signature: ${signature}, transactionId: ${uniqueId}`);
             return signature;
 
         } catch (error) {

@@ -1,6 +1,7 @@
 import { Controller, Post, Get, Body, UseGuards, Request, HttpStatus, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
+import { AirdropJwtAuthGuard } from '../guards/airdrop-jwt-auth.guard';
 import { AirdropsService } from '../services/airdrops.service';
 import { CreatePoolDto } from '../dto/create-pool.dto';
 import { CreatePoolResponseDto } from '../dto/create-pool-response.dto';
@@ -13,7 +14,7 @@ import { GetPoolsDto } from '../dto/get-pools.dto';
 
 @ApiTags('Airdrops')
 @Controller('airdrops')
-@UseGuards(JwtAuthGuard)
+@UseGuards(AirdropJwtAuthGuard)
 @ApiBearerAuth()
 export class AirdropsController {
     constructor(private readonly airdropsService: AirdropsService) {}
@@ -120,7 +121,7 @@ export class AirdropsController {
     }
 
     @Get('pool/:id')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(AirdropJwtAuthGuard)
     @ApiBearerAuth()
     @ApiOperation({
         summary: 'Lấy thông tin chi tiết airdrop pool',
