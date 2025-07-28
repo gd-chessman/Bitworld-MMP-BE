@@ -11,7 +11,7 @@ import { RefWithdrawHistory } from '../../referral/entities/ref-withdraw-history
 import { TradingOrder } from '../../trade/entities/trading-order.entity';
 import { AirdropListPool } from '../../airdrops/entities/airdrop-list-pool.entity';
 import { AirdropPoolJoin } from '../../airdrops/entities/airdrop-pool-join.entity';
-import { SwapOrder } from '../../swap/entities/swap-order.entity';
+import { SwapOrder } from '../../swaps/entities/swap-order.entity';
 
 @Entity('list_wallets')
 export class ListWallet {
