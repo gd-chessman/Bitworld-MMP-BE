@@ -420,8 +420,7 @@ export class AirdropsService {
             const updateData: any = { apj_status: finalStatus };
             
             if (success && transactionHash && transactionHash !== 'already_processed') {
-                // Có thể thêm field apj_hash nếu cần lưu transaction hash
-                // updateData.apj_hash = transactionHash;
+                updateData.apj_hash = transactionHash;
             }
             
             await this.airdropPoolJoinRepository.update(
@@ -562,6 +561,37 @@ export class AirdropsService {
 
         } catch (error) {
             this.logger.error(`Lỗi lấy danh sách pool: ${error.message}`);
+            throw error;
+        }
+    }
+
+    async getPoolDetailByIdOrSlug(idOrSlug: string, walletId: number, query: GetPoolDetailDto): Promise<PoolDetailDto> {
+        try {
+            // Kiểm tra xem idOrSlug có phải là số không
+            const isNumeric = !isNaN(Number(idOrSlug));
+            
+            let pool;
+            if (isNumeric) {
+                // Tìm theo ID
+                pool = await this.airdropListPoolRepository.findOne({
+                    where: { alp_id: parseInt(idOrSlug) }
+                });
+            } else {
+                // Tìm theo slug
+                pool = await this.airdropListPoolRepository.findOne({
+                    where: { alp_slug: idOrSlug }
+                });
+            }
+
+            if (!pool) {
+                throw new Error('Pool không tồn tại');
+            }
+
+            // Gọi method getPoolDetail với poolId đã tìm được
+            return await this.getPoolDetail(pool.alp_id, walletId, query);
+
+        } catch (error) {
+            this.logger.error(`Lỗi lấy thông tin pool detail by id or slug: ${error.message}`);
             throw error;
         }
     }

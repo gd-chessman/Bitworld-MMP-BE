@@ -40,6 +40,7 @@ Bảng lưu thông tin thành viên tham gia pool
 | apj_stake_date | TIMESTAMP | NO | CURRENT_TIMESTAMP | Thời gian stake |
 | apj_stake_end | TIMESTAMP | YES | - | Thời gian kết thúc stake |
 | apj_status | ENUM | NO | 'pending' | Trạng thái join |
+| apj_hash | TEXT | YES | NULL | Transaction hash khi giao dịch thành công |
 
 **Foreign Keys:**
 - `apj_pool_id` → `airdrop_list_pool.alp_id` (ON DELETE CASCADE, ON UPDATE CASCADE)
@@ -128,6 +129,9 @@ export class AirdropPoolJoin {
     default: AirdropPoolJoinStatus.PENDING
   })
   apj_status: AirdropPoolJoinStatus;
+
+  @Column({ name: 'apj_hash', type: 'text', nullable: true })
+  apj_hash: string | null;
 
   // Relationships
   @ManyToOne(() => AirdropListPool, pool => pool.poolJoins)
@@ -373,9 +377,9 @@ Content-Type: application/json
 
 ### Get Pool Detail API
 
-#### GET /api/v1/airdrops/pool/:id
+#### GET /api/v1/airdrops/pool/:idOrSlug
 
-Lấy thông tin chi tiết của một airdrop pool. Nếu user là creator, sẽ hiển thị thêm danh sách members.
+Lấy thông tin chi tiết của một airdrop pool theo ID hoặc slug. Nếu user là creator, sẽ hiển thị thêm danh sách members.
 
 **Headers:**
 ```
@@ -384,7 +388,7 @@ Content-Type: application/json
 ```
 
 **Path Parameters:**
-- `id`: ID của pool
+- `idOrSlug`: ID hoặc slug của pool (ví dụ: `1` hoặc `"my-airdrop-pool-1"`)
 
 **Query Parameters:**
 - `sortBy` (optional): Trường để sắp xếp danh sách members
@@ -395,6 +399,12 @@ Content-Type: application/json
 - `sortOrder` (optional): Thứ tự sắp xếp
   - `asc`: Tăng dần
   - `desc`: Giảm dần
+
+**Ví dụ Request:**
+```
+GET /api/v1/airdrops/pool/my-airdrop-pool-1
+GET /api/v1/airdrops/pool/1
+```
 
 **Response (User thường):**
 ```json
@@ -475,17 +485,21 @@ Content-Type: application/json
 ```
 
 **Business Logic:**
-1. Kiểm tra pool có tồn tại không
-2. Kiểm tra user có phải là creator của pool không
-3. Lấy thông tin stake của user trong pool:
+1. **Tìm pool theo ID hoặc slug:**
+   - Kiểm tra xem `idOrSlug` có phải là số không
+   - Nếu là số: Tìm theo `alp_id`
+   - Nếu không phải số: Tìm theo `alp_slug`
+2. Kiểm tra pool có tồn tại không
+3. Kiểm tra user có phải là creator của pool không
+4. Lấy thông tin stake của user trong pool:
    - Tính tổng volume đã stake
    - Đếm số lần stake
    - Nếu là creator, cộng thêm volume ban đầu
-4. Nếu user là creator:
+5. Nếu user là creator:
    - Lấy danh sách tất cả members (bao gồm cả creator)
    - Group theo member và tính toán thống kê
    - Sắp xếp theo yêu cầu (creator luôn ở đầu)
-5. Trả về thông tin chi tiết pool kèm thông tin stake của user
+6. Trả về thông tin chi tiết pool kèm thông tin stake của user
 
 **Sắp xếp Members:**
 - Creator luôn được sắp xếp ở vị trí đầu tiên

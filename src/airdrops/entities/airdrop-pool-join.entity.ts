@@ -37,6 +37,9 @@ export class AirdropPoolJoin {
     })
     apj_status: AirdropPoolJoinStatus;
 
+    @Column({ name: 'apj_hash', type: 'text', nullable: true })
+    apj_hash: string | null;
+
     // Foreign key reference: airdrop_pool_joins.apj_pool_id > airdrop_list_pool.alp_id
     @ManyToOne(() => AirdropListPool, pool => pool.poolJoins)
     @JoinColumn({ name: 'apj_pool_id', referencedColumnName: 'alp_id' })

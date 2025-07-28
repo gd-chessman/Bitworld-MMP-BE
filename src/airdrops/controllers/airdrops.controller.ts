@@ -1,5 +1,5 @@
 import { Controller, Post, Get, Body, UseGuards, Request, HttpStatus, Param, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
 import { AirdropJwtAuthGuard } from '../guards/airdrop-jwt-auth.guard';
 import { AirdropsService } from '../services/airdrops.service';
@@ -120,12 +120,17 @@ export class AirdropsController {
         };
     }
 
-    @Get('pool/:id')
+    @Get('pool/:idOrSlug')
     @UseGuards(AirdropJwtAuthGuard)
     @ApiBearerAuth()
     @ApiOperation({
         summary: 'Lấy thông tin chi tiết airdrop pool',
-        description: 'Lấy thông tin chi tiết của một airdrop pool. Nếu user là creator, sẽ hiển thị thêm danh sách members.'
+        description: 'Lấy thông tin chi tiết của một airdrop pool theo ID hoặc slug. Nếu user là creator, sẽ hiển thị thêm danh sách members.'
+    })
+    @ApiParam({
+        name: 'idOrSlug',
+        description: 'ID hoặc slug của pool (ví dụ: 1 hoặc "my-airdrop-pool-1")',
+        example: 'my-airdrop-pool-1'
     })
     @ApiResponse({
         status: HttpStatus.OK,
@@ -145,7 +150,7 @@ export class AirdropsController {
         description: 'Lỗi server'
     })
     async getPoolDetail(
-        @Param('id') poolId: string,
+        @Param('idOrSlug') idOrSlug: string,
         @Query() query: GetPoolDetailDto,
         @Request() req: any
     ): Promise<GetPoolDetailResponseDto> {
@@ -155,8 +160,8 @@ export class AirdropsController {
             throw new Error('Không tìm thấy wallet_id trong token');
         }
 
-        const poolDetail = await this.airdropsService.getPoolDetail(
-            parseInt(poolId),
+        const poolDetail = await this.airdropsService.getPoolDetailByIdOrSlug(
+            idOrSlug,
             walletId,
             query
         );
