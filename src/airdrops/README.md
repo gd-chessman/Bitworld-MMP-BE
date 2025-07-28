@@ -1,0 +1,561 @@
+# Airdrops Module
+
+Module quản lý hệ thống airdrop pools cho nền tảng Bittworld.
+
+## Tổng quan
+
+Module này cung cấp chức năng quản lý các airdrop pools, cho phép người dùng tạo pool airdrop và tham gia vào các pool để nhận token.
+
+## Cấu trúc Database
+
+### 1. airdrop_list_pool
+Bảng lưu thông tin các airdrop pools
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| alp_id | SERIAL | NO | - | Primary key, ID của pool |
+| alp_originator | INTEGER | NO | - | ID ví người tạo pool |
+| alp_name | VARCHAR(255) | NO | - | Tên pool |
+| alp_slug | VARCHAR(255) | NO | - | Slug của pool |
+| alp_describe | VARCHAR(1000) | YES | - | Mô tả pool |
+| alp_member_num | INTEGER | NO | 0 | Số lượng thành viên |
+| apl_volume | DECIMAL(18,6) | NO | 0 | Tổng volume |
+| apl_creation_date | TIMESTAMP | NO | CURRENT_TIMESTAMP | Thời gian tạo |
+| apl_end_date | TIMESTAMP | YES | - | Thời gian kết thúc |
+| apl_status | ENUM | NO | 'pending' | Trạng thái pool |
+| apl_hash | TEXT | YES | NULL | Transaction hash khi giao dịch thành công |
+
+**Foreign Keys:**
+- `alp_originator` → `list_wallets.wallet_id` (ON DELETE RESTRICT, ON UPDATE CASCADE)
+
+### 2. airdrop_pool_joins
+Bảng lưu thông tin thành viên tham gia pool
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| apj_id | SERIAL | NO | - | Primary key, ID của join |
+| apj_pool_id | INTEGER | NO | - | ID pool tham gia |
+| apj_member | INTEGER | NO | - | ID ví thành viên |
+| apj_volume | DECIMAL(18,6) | NO | 0 | Volume stake |
+| apj_stake_date | TIMESTAMP | NO | CURRENT_TIMESTAMP | Thời gian stake |
+| apj_stake_end | TIMESTAMP | YES | - | Thời gian kết thúc stake |
+| apj_status | ENUM | NO | 'pending' | Trạng thái join |
+
+**Foreign Keys:**
+- `apj_pool_id` → `airdrop_list_pool.alp_id` (ON DELETE CASCADE, ON UPDATE CASCADE)
+- `apj_member` → `list_wallets.wallet_id` (ON DELETE CASCADE, ON UPDATE CASCADE)
+
+## Entity Relationships
+
+### AirdropListPool Entity
+```typescript
+@Entity('airdrop_list_pool')
+export class AirdropListPool {
+  @PrimaryGeneratedColumn({ name: 'alp_id' })
+  alp_id: number;
+
+  @Column({ name: 'alp_originator', type: 'integer', nullable: false })
+  alp_originator: number;
+
+  @Column({ name: 'alp_name', type: 'varchar', length: 255, nullable: false })
+  alp_name: string;
+
+  @Column({ name: 'alp_slug', type: 'varchar', length: 255, nullable: false })
+  alp_slug: string;
+
+  @Column({ name: 'alp_describe', type: 'varchar', length: 1000, nullable: true })
+  alp_describe: string;
+
+  @Column({ name: 'alp_member_num', type: 'integer', default: 0 })
+  alp_member_num: number;
+
+  @Column({ name: 'apl_volume', type: 'decimal', precision: 18, scale: 6, default: 0 })
+  apl_volume: number;
+
+  @CreateDateColumn({ name: 'apl_creation_date' })
+  apl_creation_date: Date;
+
+  @Column({ name: 'apl_end_date', type: 'timestamp', nullable: true })
+  apl_end_date: Date;
+
+  @Column({
+    name: 'apl_status',
+    type: 'enum',
+    enum: AirdropPoolStatus,
+    default: AirdropPoolStatus.PENDING
+  })
+  apl_status: AirdropPoolStatus;
+
+  @Column({ name: 'apl_hash', type: 'text', nullable: true })
+  apl_hash: string | null;
+
+  // Relationships
+  @ManyToOne(() => ListWallet, wallet => wallet.airdropPools)
+  @JoinColumn({ name: 'alp_originator' })
+  originator: ListWallet;
+
+  @OneToMany(() => AirdropPoolJoin, join => join.pool)
+  poolJoins: AirdropPoolJoin[];
+}
+```
+
+### AirdropPoolJoin Entity
+```typescript
+@Entity('airdrop_pool_joins')
+export class AirdropPoolJoin {
+  @PrimaryGeneratedColumn({ name: 'apj_id' })
+  apj_id: number;
+
+  @Column({ name: 'apj_pool_id', type: 'integer', nullable: false })
+  apj_pool_id: number;
+
+  @Column({ name: 'apj_member', type: 'integer', nullable: false })
+  apj_member: number;
+
+  @Column({ name: 'apj_volume', type: 'decimal', precision: 18, scale: 6, default: 0 })
+  apj_volume: number;
+
+  @CreateDateColumn({ name: 'apj_stake_date' })
+  apj_stake_date: Date;
+
+  @Column({ name: 'apj_stake_end', type: 'timestamp', nullable: true })
+  apj_stake_end: Date;
+
+  @Column({
+    name: 'apj_status',
+    type: 'enum',
+    enum: AirdropPoolJoinStatus,
+    default: AirdropPoolJoinStatus.PENDING
+  })
+  apj_status: AirdropPoolJoinStatus;
+
+  // Relationships
+  @ManyToOne(() => AirdropListPool, pool => pool.poolJoins)
+  @JoinColumn({ name: 'apj_pool_id' })
+  pool: AirdropListPool;
+
+  @ManyToOne(() => ListWallet, wallet => wallet.airdropPoolJoins)
+  @JoinColumn({ name: 'apj_member' })
+  member: ListWallet;
+}
+```
+
+## Enums
+
+### AirdropPoolStatus
+```typescript
+export enum AirdropPoolStatus {
+  PENDING = 'pending',
+  ACTIVE = 'active',
+  END = 'end',
+  ERROR = 'error'
+}
+```
+
+### AirdropPoolJoinStatus
+```typescript
+export enum AirdropPoolJoinStatus {
+  PENDING = 'pending',
+  ACTIVE = 'active',
+  WITHDRAW = 'withdraw',
+  ERROR = 'error'
+}
+```
+
+## API Endpoints
+
+### Create Pool API
+
+#### POST /api/v1/airdrops/create-pool
+
+Tạo một airdrop pool mới với token X.
+
+**Headers:**
+```
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "name": "My Airdrop Pool",
+  "logo": "https://example.com/logo.png",
+  "describe": "Mô tả chi tiết về pool",
+  "initialAmount": 1000000
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Tạo pool thành công",
+  "data": {
+    "poolId": 1,
+    "name": "My Airdrop Pool",
+    "slug": "my-airdrop-pool-1",
+    "status": "active",
+    "initialAmount": 1000000,
+    "transactionHash": "5J7X...abc123"
+  }
+}
+```
+
+**Validation Rules:**
+- `initialAmount`: Tối thiểu 1,000,000 token X
+- `name`: Bắt buộc, không được rỗng
+- `logo`: Bắt buộc, URL hợp lệ
+- `describe`: Tùy chọn
+
+### Stake Pool API
+
+#### POST /api/v1/airdrops/stake-pool
+
+Stake token X vào một airdrop pool đã tồn tại. Có thể stake nhiều lần.
+
+**Headers:**
+```
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "poolId": 1,
+  "stakeAmount": 500000
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Stake pool thành công",
+  "data": {
+    "joinId": 1,
+    "poolId": 1,
+    "stakeAmount": 500000,
+    "status": "active",
+    "transactionHash": "9K8Y...def456"
+  }
+}
+```
+
+**Validation Rules:**
+- `poolId`: Bắt buộc, ID của pool muốn stake
+- `stakeAmount`: Tối thiểu 1 token X
+
+**Business Logic:**
+1. **Cho phép stake nhiều lần:**
+   - Cả ví tạo pool và ví đã tham gia đều có thể stake tiếp
+   - Mỗi lần stake tạo một record mới trong airdrop_pool_joins
+2. Kiểm tra pool có tồn tại và đang active không
+3. Kiểm tra số dư token X của wallet
+4. Kiểm tra số dư SOL và chuyển phí nếu cần:
+   - Nếu < 0.00002 SOL: Chuyển 0.00002 SOL từ WALLET_SUP_FREE_PRIVATE_KEY
+   - Thử tối đa 3 lần nếu thất bại
+   - Chờ transaction confirm thực sự (tối đa 30 giây)
+   - Kiểm tra lại số dư SOL sau khi chuyển phí
+   - Chờ 2 giây giữa các lần thử
+5. Tạo stake record với trạng thái `pending`:
+   - `apj_stake_date`: Thời gian hiện tại
+   - `apj_stake_end`: Thời gian hiện tại + 365 ngày
+6. Chuyển token X từ wallet người dùng đến WALLET_BITT:
+   - Kiểm tra xem stake đã có transaction hash chưa (tránh trùng lặp)
+   - Thử tối đa 3 lần nếu thất bại
+   - Chờ transaction confirm thực sự sau mỗi lần thử
+   - Chờ 3 giây giữa các lần thử
+   - Tạo unique transaction với timestamp + random để tránh trùng lặp
+7. Cập nhật trạng thái stake:
+   - `active`: Nếu giao dịch thành công
+   - `error`: Nếu giao dịch thất bại sau 3 lần thử
+8. Cập nhật số lượng member và volume của pool:
+   - Tăng volume theo stakeAmount
+   - Chỉ tăng member nếu user chưa có stake record trước đó
+9. Log kết quả cuối cùng cho monitoring
+
+**Business Logic:**
+1. **Chống trùng lặp API call:**
+   - Kiểm tra xem wallet đã có pool đang pending chưa
+   - Nếu có → throw error "Bạn đã có một pool đang trong quá trình tạo"
+2. Kiểm tra số lượng khởi tạo tối thiểu (1,000,000)
+3. Kiểm tra số dư token X của wallet (sử dụng MINT_TOKEN_AIRDROP từ .env)
+4. Kiểm tra số dư SOL của wallet:
+   - Nếu < 0.00002 SOL: Chuyển 0.00002 SOL từ WALLET_SUP_FREE_PRIVATE_KEY
+   - Chờ transaction confirm thực sự (tối đa 30 giây)
+   - Kiểm tra lại số dư SOL sau khi chuyển phí
+5. Tạo pool với trạng thái `pending`:
+   - `apl_creation_date`: Thời gian hiện tại
+   - `apl_end_date`: Thời gian hiện tại + 365 ngày
+6. Tạo slug từ name và ID pool (ví dụ: "Pool mới" + ID 5 = "pool-moi-5")
+7. Chuyển token X từ wallet người dùng đến WALLET_BITT:
+   - Kiểm tra xem pool đã có transaction hash chưa (tránh trùng lặp)
+   - Thử tối đa 3 lần nếu thất bại
+   - Chờ transaction confirm thực sự sau mỗi lần thử
+   - Chờ 3 giây giữa các lần thử
+   - Tạo unique transaction với timestamp + random để tránh trùng lặp
+8. Cập nhật trạng thái pool và transaction hash:
+   - `active` + `apl_hash`: Nếu giao dịch thành công
+   - `error`: Nếu giao dịch thất bại sau 3 lần thử
+9. Log kết quả cuối cùng cho monitoring
+
+### Get Pools API
+
+#### GET /api/v1/airdrops/pools
+
+Lấy danh sách tất cả các airdrop pools đang hoạt động với thông tin chi tiết. Hỗ trợ sắp xếp theo nhiều trường.
+
+**Headers:**
+```
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+```
+
+**Query Parameters:**
+- `sortBy` (optional): Trường để sắp xếp danh sách pools
+  - `creationDate`: Sắp xếp theo ngày tạo (mặc định)
+  - `name`: Sắp xếp theo tên pool
+  - `memberCount`: Sắp xếp theo số lượng member
+  - `totalVolume`: Sắp xếp theo tổng volume
+  - `endDate`: Sắp xếp theo ngày kết thúc
+- `sortOrder` (optional): Thứ tự sắp xếp
+  - `asc`: Tăng dần
+  - `desc`: Giảm dần (mặc định)
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Lấy danh sách pool thành công",
+  "data": [
+    {
+      "poolId": 1,
+      "name": "My Airdrop Pool",
+      "slug": "my-airdrop-pool-1",
+      "logo": "https://example.com/logo.png",
+      "describe": "Mô tả chi tiết về pool",
+      "memberCount": 25,
+      "totalVolume": 5000000,
+      "creationDate": "2024-01-15T10:30:00.000Z",
+      "endDate": "2025-01-15T10:30:00.000Z",
+      "status": "active",
+      "userStakeInfo": {
+        "isCreator": false,
+        "joinStatus": "active",
+        "joinDate": "2024-01-16T15:30:00.000Z",
+        "totalStaked": 1000000
+      }
+    }
+  ]
+}
+```
+
+**Business Logic:**
+1. Lấy tất cả pools có trạng thái `active`
+2. Sắp xếp theo trường được chọn (mặc định: ngày tạo giảm dần)
+3. Với mỗi pool, kiểm tra thông tin stake của user:
+   - Kiểm tra user có phải là creator không
+   - Lấy tất cả stake records của user trong pool
+   - Tính tổng volume user đã stake
+   - Nếu là creator, cộng thêm volume ban đầu của pool
+4. Trả về thông tin pool kèm thông tin stake của user (nếu có)
+
+**Sắp xếp Pools:**
+- Hỗ trợ sắp xếp theo:
+  - Ngày tạo (creationDate) - mặc định
+  - Tên pool (name)
+  - Số lượng member (memberCount)
+  - Tổng volume (totalVolume)
+  - Ngày kết thúc (endDate)
+- Hỗ trợ thứ tự tăng dần (asc) hoặc giảm dần (desc)
+
+### Get Pool Detail API
+
+#### GET /api/v1/airdrops/pool/:id
+
+Lấy thông tin chi tiết của một airdrop pool. Nếu user là creator, sẽ hiển thị thêm danh sách members.
+
+**Headers:**
+```
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+```
+
+**Path Parameters:**
+- `id`: ID của pool
+
+**Query Parameters:**
+- `sortBy` (optional): Trường để sắp xếp danh sách members
+  - `joinDate`: Sắp xếp theo ngày tham gia
+  - `totalStaked`: Sắp xếp theo tổng số lượng stake
+  - `stakeCount`: Sắp xếp theo số lần stake
+  - `memberId`: Sắp xếp theo ID member
+- `sortOrder` (optional): Thứ tự sắp xếp
+  - `asc`: Tăng dần
+  - `desc`: Giảm dần
+
+**Response (User thường):**
+```json
+{
+  "success": true,
+  "message": "Lấy thông tin pool thành công",
+  "data": {
+    "poolId": 1,
+    "name": "My Airdrop Pool",
+    "slug": "my-airdrop-pool-1",
+    "logo": "https://example.com/logo.png",
+    "describe": "Mô tả chi tiết về pool",
+    "memberCount": 25,
+    "totalVolume": 5000000,
+    "creationDate": "2024-01-15T10:30:00.000Z",
+    "endDate": "2025-01-15T10:30:00.000Z",
+    "status": "active",
+    "transactionHash": "5J7X...abc123",
+    "userStakeInfo": {
+      "isCreator": false,
+      "joinStatus": "active",
+      "joinDate": "2024-01-16T15:30:00.000Z",
+      "totalStaked": 1000000,
+      "stakeCount": 3
+    }
+  }
+}
+```
+
+**Response (Creator):**
+```json
+{
+  "success": true,
+  "message": "Lấy thông tin pool thành công",
+  "data": {
+    "poolId": 1,
+    "name": "My Airdrop Pool",
+    "slug": "my-airdrop-pool-1",
+    "logo": "https://example.com/logo.png",
+    "describe": "Mô tả chi tiết về pool",
+    "memberCount": 25,
+    "totalVolume": 5000000,
+    "creationDate": "2024-01-15T10:30:00.000Z",
+    "endDate": "2025-01-15T10:30:00.000Z",
+    "status": "active",
+    "transactionHash": "5J7X...abc123",
+    "userStakeInfo": {
+      "isCreator": true,
+      "joinStatus": "creator",
+      "joinDate": "2024-01-15T10:30:00.000Z",
+      "totalStaked": 6000000,
+      "stakeCount": 0
+    },
+    "members": [
+      {
+        "memberId": 123456,
+        "solanaAddress": "9K8Y...abc123",
+        "nickname": "Creator",
+        "isCreator": true,
+        "joinDate": "2024-01-15T10:30:00.000Z",
+        "totalStaked": 5000000,
+        "stakeCount": 0,
+        "status": "active"
+      },
+      {
+        "memberId": 789012,
+        "solanaAddress": "9K8Y...def456",
+        "nickname": "User123",
+        "isCreator": false,
+        "joinDate": "2024-01-16T15:30:00.000Z",
+        "totalStaked": 1000000,
+        "stakeCount": 3,
+        "status": "active"
+      }
+    ]
+  }
+}
+```
+
+**Business Logic:**
+1. Kiểm tra pool có tồn tại không
+2. Kiểm tra user có phải là creator của pool không
+3. Lấy thông tin stake của user trong pool:
+   - Tính tổng volume đã stake
+   - Đếm số lần stake
+   - Nếu là creator, cộng thêm volume ban đầu
+4. Nếu user là creator:
+   - Lấy danh sách tất cả members (bao gồm cả creator)
+   - Group theo member và tính toán thống kê
+   - Sắp xếp theo yêu cầu (creator luôn ở đầu)
+5. Trả về thông tin chi tiết pool kèm thông tin stake của user
+
+**Sắp xếp Members:**
+- Creator luôn được sắp xếp ở vị trí đầu tiên
+- Các members khác được sắp xếp theo trường được chọn
+- Hỗ trợ sắp xếp theo:
+  - Ngày tham gia (joinDate)
+  - Tổng số lượng stake (totalStaked)
+  - Số lần stake (stakeCount)
+  - ID member (memberId)
+
+## Environment Variables
+
+Thêm các biến môi trường sau vào file `.env`:
+
+```env
+# Token mint address cho airdrop
+MINT_TOKEN_AIRDROP=your_token_mint_address_here
+
+# Wallet Bittworld để nhận token
+WALLET_BITT=your_bittworld_wallet_address_here
+
+# Private key của wallet hỗ trợ phí SOL
+WALLET_SUP_FREE_PRIVATE_KEY=your_support_wallet_private_key_here
+```
+
+## Migration
+
+Để tạo các bảng trong database, chạy migration:
+
+```bash
+npm run migration:run
+```
+
+Migration sẽ tạo:
+1. Bảng `airdrop_list_pool`
+2. Bảng `airdrop_pool_joins`
+3. Foreign key constraints
+4. Indexes cho performance
+
+## Cấu trúc thư mục
+
+```
+src/airdrops/
+├── entities/
+│   ├── airdrop-list-pool.entity.ts
+│   └── airdrop-pool-join.entity.ts
+├── dto/
+├── controllers/
+├── services/
+├── migrations/
+│   └── 1748609023923-CreateAirdropTables.ts
+├── airdrops.module.ts
+└── README.md
+```
+
+## Lưu ý quan trọng
+
+1. **Foreign Key Constraints:**
+   - CASCADE: Khi xóa pool, tất cả joins sẽ bị xóa
+   - RESTRICT: Không cho phép xóa wallet đang tạo pool
+   - SET NULL: Không áp dụng
+
+2. **Performance:**
+   - Indexes được tạo cho tất cả foreign keys
+   - Indexes cho các trường thường query: status, creation_date, stake_date
+
+3. **Data Integrity:**
+   - Foreign key constraints đảm bảo tính toàn vẹn dữ liệu
+   - Enum constraints đảm bảo giá trị hợp lệ
+
+4. **Entity Relationships:**
+   - Đầy đủ bidirectional relationships
+   - Có thể query theo cả hai chiều 

@@ -9,6 +9,8 @@ import { BgAffiliateCommissionLog } from '../../referral/entities/bg-affiliate-c
 import { BgAffiliateCommissionReward } from '../../referral/entities/bg-affiliate-commission-reward.entity';
 import { RefWithdrawHistory } from '../../referral/entities/ref-withdraw-history.entity';
 import { TradingOrder } from '../../trade/entities/trading-order.entity';
+import { AirdropListPool } from '../../airdrops/entities/airdrop-list-pool.entity';
+import { AirdropPoolJoin } from '../../airdrops/entities/airdrop-pool-join.entity';
 import { SwapOrder } from '../../swap/entities/swap-order.entity';
 
 @Entity('list_wallets')
@@ -120,6 +122,13 @@ export class ListWallet {
     // Referral withdraw history relationship
     @OneToMany(() => RefWithdrawHistory, withdrawHistory => withdrawHistory.wallet)
     refWithdrawHistories: RefWithdrawHistory[];
+
+    // Airdrop relationships
+    @OneToMany(() => AirdropListPool, pool => pool.originator)
+    airdropPools: AirdropListPool[];
+
+    @OneToMany(() => AirdropPoolJoin, join => join.member)
+    airdropPoolJoins: AirdropPoolJoin[];
 
     // Swap relationships
     @OneToMany(() => SwapOrder, swapOrder => swapOrder.wallet)

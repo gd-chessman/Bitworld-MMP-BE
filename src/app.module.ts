@@ -29,6 +29,7 @@ import { ReferralModule } from './referral/referral.module';
 import { DepositWithdrawModule } from './deposit-withdraw/deposit-withdraw.module';
 import { AdminModule } from './admin/admin.module';
 import { SwapModule } from './swap/swap.module';
+import { AirdropsModule } from './airdrops/airdrops.module';
 //import { ThrottlerModule } from '@nestjs/throttler';
 //import { RateLimitMiddleware } from './common/middleware/rate-limit.middleware';
 
@@ -86,6 +87,7 @@ initializeTransactionalContext();
     DepositWithdrawModule,
     SwapModule,
     AdminModule,
+    AirdropsModule,
     // ThrottlerModule.forRoot({
     //   throttlers: [{
     //     ttl: 60, // 1 phút
