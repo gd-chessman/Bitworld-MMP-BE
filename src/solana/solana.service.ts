@@ -34,7 +34,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import { SystemProgram } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { getAssociatedTokenAddress, createAssociatedTokenAccount, ASSOCIATED_TOKEN_PROGRAM_ID } from '@project-serum/associated-token';
-import { Token } from '@solana/spl-token';
+
 
 interface RaydiumPool {
     slp_pool_id: string;
@@ -1985,11 +1985,12 @@ export class SolanaService {
             const tokenData = AccountLayout.decode(accountInfo.data);
 
             // Lấy URI từ token data
-            if (tokenData.mint && tokenData.mint.length > 0) {
-                const mintAccount = await this.connection.getAccountInfo(new PublicKey(tokenData.mint));
+            if (tokenData.mint) {
+                const mintAccount = await this.connection.getAccountInfo(tokenData.mint);
                 if (mintAccount) {
                     const mintData = MintLayout.decode(mintAccount.data);
-                    return mintData.uri || null;
+                    // MintLayout không có uri property, cần tìm metadata account
+                    return null;
                 }
             }
 

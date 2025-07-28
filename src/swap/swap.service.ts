@@ -6,7 +6,8 @@ import { Connection, PublicKey, Transaction, sendAndConfirmTransaction, Keypair,
 import { SwapOrder, SwapOrderType, SwapOrderStatus } from './entities/swap-order.entity';
 import { ListWallet } from '../telegram-wallets/entities/list-wallet.entity';
 import { CreateSwapDto } from './dto/create-swap.dto';
-import { TOKEN_PROGRAM_ID} from '@solana/spl-token';
+import { TOKEN_PROGRAM_ID, getMint, createMintToInstruction, createTransferInstruction, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from '@solana/spl-token';
+
 import bs58 from 'bs58';
 import axios from 'axios';
 
@@ -102,7 +103,7 @@ export class SwapService {
     }
   }
 
-  async createSwap(createSwapDto: CreateSwapDto, walletId: number): Promise<SwapOrder> {
+  async createSwap(createSwapDto: CreateSwapDto, walletId: number): Promise<any> {
     try {
       // 1. Validate input
       if (createSwapDto.input_amount <= 0) {
@@ -224,10 +225,46 @@ export class SwapService {
         switch (createSwapDto.swap_type) {
           case SwapOrderType.USDT_TO_SOL:
             // USDT sang SOL: User gửi USDT, nhận SOL
-            // Note: Đây là implementation đơn giản, trong thực tế cần xử lý SPL token transfer
-            // và tạo ATA nếu cần thiết
             
-            // Gửi SOL từ pool đến user (simplified)
+            const usdtMintUsdtToSol = new PublicKey(this.USDT_MINT);
+            
+            // Lấy Associated Token Account của user cho USDT
+            const userUsdtAtaUsdtToSol = await getAssociatedTokenAddress(
+              usdtMintUsdtToSol,
+              userKeypair.publicKey
+            );
+            
+            // Lấy Associated Token Account của pool cho USDT
+            const poolUsdtAtaUsdtToSol = await getAssociatedTokenAddress(
+              usdtMintUsdtToSol,
+              this.swapAuthorityKeypair.publicKey
+            );
+            
+            // Kiểm tra xem pool có ATA cho USDT chưa, nếu chưa thì tạo
+            const poolUsdtAccountUsdtToSol = await this.connection.getAccountInfo(poolUsdtAtaUsdtToSol);
+            if (!poolUsdtAccountUsdtToSol) {
+              transaction.add(
+                createAssociatedTokenAccountInstruction(
+                  this.swapAuthorityKeypair.publicKey, // payer
+                  poolUsdtAtaUsdtToSol, // associated token account
+                  this.swapAuthorityKeypair.publicKey, // owner
+                  usdtMintUsdtToSol // mint
+                )
+              );
+            }
+            
+            // Gửi USDT từ user đến pool
+            const inputUsdtAmount = Math.floor(createSwapDto.input_amount * 1e6); // USDT có 6 decimals
+            transaction.add(
+              createTransferInstruction(
+                userUsdtAtaUsdtToSol, // from: user's USDT account
+                poolUsdtAtaUsdtToSol, // to: pool's USDT account
+                userKeypair.publicKey, // authority
+                inputUsdtAmount // amount
+              )
+            );
+            
+            // Gửi SOL từ pool đến user
             const outputSolLamports = Math.floor(outputAmount * 1e9);
             transaction.add(
               SystemProgram.transfer({
@@ -236,6 +273,8 @@ export class SwapService {
                 lamports: outputSolLamports,
               })
             );
+            
+            this.logger.log(`USDT to SOL swap: User sent ${createSwapDto.input_amount} USDT, will receive ${outputAmount} SOL`);
             break;
 
           case SwapOrderType.SOL_TO_USDT:
@@ -252,6 +291,44 @@ export class SwapService {
             );
 
             // Gửi USDT từ pool về cho user
+            const usdtMintSolToUsdt = new PublicKey(this.USDT_MINT);
+            
+            // Lấy Associated Token Account của user cho USDT
+            const userUsdtAtaSolToUsdt = await getAssociatedTokenAddress(
+              usdtMintSolToUsdt,
+              userKeypair.publicKey
+            );
+            
+            // Lấy Associated Token Account của pool cho USDT
+            const poolUsdtAtaSolToUsdt = await getAssociatedTokenAddress(
+              usdtMintSolToUsdt,
+              this.swapAuthorityKeypair.publicKey
+            );
+            
+            // Kiểm tra xem user có ATA cho USDT chưa, nếu chưa thì tạo
+            const userUsdtAccountSolToUsdt = await this.connection.getAccountInfo(userUsdtAtaSolToUsdt);
+            if (!userUsdtAccountSolToUsdt) {
+              transaction.add(
+                createAssociatedTokenAccountInstruction(
+                  this.swapAuthorityKeypair.publicKey, // payer
+                  userUsdtAtaSolToUsdt, // associated token account
+                  userKeypair.publicKey, // owner
+                  usdtMintSolToUsdt // mint
+                )
+              );
+            }
+            
+            // Gửi USDT từ pool về user
+            const outputUsdtAmount = Math.floor(outputAmount * 1e6); // USDT có 6 decimals
+            transaction.add(
+              createTransferInstruction(
+                poolUsdtAtaSolToUsdt, // from: pool's USDT account
+                userUsdtAtaSolToUsdt, // to: user's USDT account
+                this.swapAuthorityKeypair.publicKey, // authority
+                outputUsdtAmount // amount
+              )
+            );
+            
             this.logger.log(`SOL to USDT swap: User sent ${createSwapDto.input_amount} SOL, will receive ${outputAmount} USDT`);
             
             break;
@@ -262,16 +339,20 @@ export class SwapService {
         transaction.recentBlockhash = blockhash;
         transaction.feePayer = userKeypair.publicKey;
 
-        // Gửi và xác nhận transaction - chỉ ký với keypair cần thiết
+        // Gửi và xác nhận transaction - cần cả user và authority ký
         let signers: Keypair[];
         switch (createSwapDto.swap_type) {
           case SwapOrderType.USDT_TO_SOL:
-            // Chỉ cần authority ký vì authority gửi SOL
-            signers = [this.swapAuthorityKeypair];
+            // Cần cả user và authority ký:
+            // - User ký để gửi USDT
+            // - Authority ký để gửi SOL và tạo ATA (nếu cần)
+            signers = [userKeypair, this.swapAuthorityKeypair];
             break;
           case SwapOrderType.SOL_TO_USDT:
-            // Chỉ cần user ký vì user gửi SOL
-            signers = [userKeypair];
+            // Cần cả user và authority ký:
+            // - User ký để gửi SOL
+            // - Authority ký để gửi USDT và tạo ATA (nếu cần)
+            signers = [userKeypair, this.swapAuthorityKeypair];
             break;
           default:
             signers = [userKeypair];
@@ -294,7 +375,22 @@ export class SwapService {
 
         this.logger.log(`Swap completed successfully: ${createSwapDto.swap_type}, Amount: ${createSwapDto.input_amount}, Output: ${outputAmount}, TX: ${txHash}`);
 
-        return savedOrder;
+        return {
+          success: true,
+          message: 'Swap order created successfully',
+          data: {
+            swap_order_id: savedOrder.swap_order_id,
+            swap_type: savedOrder.swap_type,
+            input_amount: savedOrder.input_amount,
+            output_amount: savedOrder.output_amount,
+            exchange_rate: savedOrder.exchange_rate,
+            status: savedOrder.status,
+            transaction_hash: savedOrder.transaction_hash,
+            error_message: savedOrder.error_message,
+            created_at: savedOrder.created_at,
+            updated_at: savedOrder.updated_at,
+          },
+        };
 
       } catch (error) {
         // 10. Xử lý lỗi và cập nhật order
@@ -324,7 +420,7 @@ export class SwapService {
     }
   }
 
-  async getSwapOrder(swapOrderId: number, walletId: number): Promise<SwapOrder> {
+  async getSwapOrder(swapOrderId: number, walletId: number): Promise<any> {
     const swapOrder = await this.swapOrderRepository.findOne({
       where: { swap_order_id: swapOrderId, wallet_id: walletId },
     });
@@ -333,15 +429,25 @@ export class SwapService {
       throw new BadRequestException('Swap order not found');
     }
 
-    return swapOrder;
+    return {
+      success: true,
+      message: 'Swap order retrieved successfully',
+      data: swapOrder,
+    };
   }
 
-  async getSwapHistory(walletId: number, limit: number = 20, offset: number = 0): Promise<SwapOrder[]> {
-    return await this.swapOrderRepository.find({
+  async getSwapHistory(walletId: number, limit: number = 20, offset: number = 0): Promise<any> {
+    const swapHistory = await this.swapOrderRepository.find({
       where: { wallet_id: walletId },
       order: { created_at: 'DESC' },
       take: limit,
       skip: offset,
     });
+
+    return {
+      success: true,
+      message: 'Swap history retrieved successfully',
+      data: swapHistory,
+    };
   }
 } 

@@ -8,8 +8,7 @@ import * as jsbiOriginal from 'jsbi';
 import { retry } from 'async';
 import {
     TOKEN_PROGRAM_ID,
-    ASSOCIATED_TOKEN_PROGRAM_ID,
-    Token
+    ASSOCIATED_TOKEN_PROGRAM_ID
 } from '@solana/spl-token';
 import { ConfigService } from '@nestjs/config';
 import { Transaction } from '@solana/web3.js';

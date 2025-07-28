@@ -18,6 +18,9 @@
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
     "esModuleInterop": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "paths": {
+      "@solana/spl-token": ["./node_modules/@solana/spl-token"]
+    }
   }
 }

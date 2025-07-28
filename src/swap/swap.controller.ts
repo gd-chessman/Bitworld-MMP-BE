@@ -14,19 +14,7 @@ export class SwapController {
     @Request() req: any,
   ) {
     const walletId = req.user.wallet_id;
-    const swapOrder = await this.swapService.createSwap(createSwapDto, walletId);
-    
-    return {
-      success: true,
-      message: 'Swap order created successfully',
-      data: {
-        swap_order_id: swapOrder.swap_order_id,
-        swap_type: swapOrder.swap_type,
-        input_amount: swapOrder.input_amount,
-        status: swapOrder.status,
-        created_at: swapOrder.created_at,
-      },
-    };
+    return await this.swapService.createSwap(createSwapDto, walletId);
   }
 
   @Get(':swapOrderId')
@@ -35,13 +23,7 @@ export class SwapController {
     @Request() req: any,
   ) {
     const walletId = req.user.wallet_id;
-    const swapOrder = await this.swapService.getSwapOrder(swapOrderId, walletId);
-    
-    return {
-      success: true,
-      message: 'Swap order retrieved successfully',
-      data: swapOrder,
-    };
+    return await this.swapService.getSwapOrder(swapOrderId, walletId);
   }
 
   @Get()
@@ -51,12 +33,6 @@ export class SwapController {
     @Request() req: any,
   ) {
     const walletId = req.user.wallet_id;
-    const swapHistory = await this.swapService.getSwapHistory(walletId, limit, offset);
-    
-    return {
-      success: true,
-      message: 'Swap history retrieved successfully',
-      data: swapHistory,
-    };
+    return await this.swapService.getSwapHistory(walletId, limit, offset);
   }
 } 
