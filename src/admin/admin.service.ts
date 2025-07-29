@@ -21,16 +21,27 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { SwapInvestors } from '../swaps/entities/swap-investor.entity';
 import { CreateInvestorDto } from './dto/create-investor.dto';
 import { PublicKey } from '@solana/web3.js';
+import { SwapSettings } from '../swaps/entities/swap-setting.entity';
+import { SwapInvestorReward } from '../swaps/entities/swap-investor-reward.entity';
+import { SwapSettingDto, UpdateSwapSettingDto } from './dto/swap-setting.dto';
 
 @Injectable()
 export class AdminService implements OnModuleInit {
   constructor(
-    @InjectRepository(SolanaListCategoriesToken)
-    private categoriesRepository: Repository<SolanaListCategoriesToken>,
-    @InjectRepository(Setting)
-    private settingRepository: Repository<Setting>,
     @InjectRepository(UserAdmin)
     private userAdminRepository: Repository<UserAdmin>,
+    @InjectRepository(Setting)
+    private settingRepository: Repository<Setting>,
+    @InjectRepository(SwapInvestors)
+    private swapInvestorsRepository: Repository<SwapInvestors>,
+    @InjectRepository(SwapSettings)
+    private swapSettingsRepository: Repository<SwapSettings>,
+    @InjectRepository(SwapInvestorReward)
+    private swapInvestorRewardRepository: Repository<SwapInvestorReward>,
+    private jwtService: JwtService,
+    private bgRefService: BgRefService,
+    @InjectRepository(SolanaListCategoriesToken)
+    private categoriesRepository: Repository<SolanaListCategoriesToken>,
     @InjectRepository(ListWallet)
     private listWalletRepository: Repository<ListWallet>,
     @InjectRepository(ReferentSetting)
@@ -41,18 +52,19 @@ export class AdminService implements OnModuleInit {
     private tradingOrderRepository: Repository<TradingOrder>,
     @InjectRepository(ReferentLevelReward)
     private referentLevelRewardRepository: Repository<ReferentLevelReward>,
-    @InjectRepository(SwapInvestors)
-    private swapInvestorsRepository: Repository<SwapInvestors>,
-    private jwtService: JwtService,
-    private bgRefService: BgRefService,
     private dataSource: DataSource,
-  ) {}
+  ) {
+    // Initialize swap settings on app start
+    this.initializeSwapSettings();
+  }
 
   async onModuleInit() {
     await this.initializeDefaultSetting();
     await this.initializeDefaultAdmin();
     await this.initializeDefaultReferentSetting();
     await this.initializeDefaultReferentLevelRewards();
+    // Initialize swap settings when module starts
+    await this.initializeSwapSettings();
   }
 
   private async initializeDefaultSetting() {
@@ -363,7 +375,8 @@ export class AdminService implements OnModuleInit {
     wallet_auth?: string,
     wallet_type?: 'main' | 'all',
     currentUser?: UserAdmin,
-    isBittworld?: string
+    isBittworld?: string,
+    bittworld_uid?: string
   ): Promise<{ data: ListWallet[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
     const skip = (page - 1) * limit;
     
@@ -380,6 +393,7 @@ export class AdminService implements OnModuleInit {
         'wallet.wallet_country',
         'wallet.wallet_code_ref',
         'wallet.isBittworld',
+        'wallet.bittworld_uid',
         'wallet_auths'
       ]);
 
@@ -415,6 +429,17 @@ export class AdminService implements OnModuleInit {
     // Filter by wallet type (main or all)
     if (wallet_type === 'main') {
       whereConditions.push('EXISTS (SELECT 1 FROM wallet_auth wa WHERE wa.wa_wallet_id = wallet.wallet_id AND wa.wa_type = \'main\')');
+    }
+
+    // Filter by bittworld_uid
+    if (bittworld_uid !== undefined && bittworld_uid !== '') {
+      if (bittworld_uid === 'has_uid') {
+        // Những cái có bittworld_uid
+        whereConditions.push('wallet.bittworld_uid IS NOT NULL AND wallet.bittworld_uid != \'\'');
+      } else if (bittworld_uid === 'no_uid') {
+        // Những cái không có bittworld_uid
+        whereConditions.push('(wallet.bittworld_uid IS NULL OR wallet.bittworld_uid = \'\')');
+      }
     }
 
     // Apply where conditions
@@ -2144,4 +2169,251 @@ export class AdminService implements OnModuleInit {
     };
   }
 
+  // Initialize default swap settings if not exists
+  async initializeSwapSettings() {
+    const existingSettings = await this.swapSettingsRepository.findOne({
+      where: {}
+    });
+
+    if (!existingSettings) {
+      const defaultSettings = this.swapSettingsRepository.create({
+        swap_fee_percent: 3.00, // 3% default fee
+        investor_share_percent: 2.00 // 2% default share
+      });
+      
+      await this.swapSettingsRepository.save(defaultSettings);
+      console.log('✅ Swap settings initialized with default values');
+    }
+  }
+
+  // Get swap settings
+  async getSwapSettings() {
+    const settings = await this.swapSettingsRepository.findOne({
+      where: {},
+      order: { created_at: 'DESC' }
+    });
+
+    if (!settings) {
+      // Auto initialize if not exists
+      await this.initializeSwapSettings();
+      const newSettings = await this.swapSettingsRepository.findOne({
+        where: {},
+        order: { created_at: 'DESC' }
+      });
+      
+      if (!newSettings) {
+        throw new BadRequestException('Failed to initialize swap settings');
+      }
+      
+      // Convert decimal strings to numbers
+      const formattedSettings = {
+        ...newSettings,
+        swap_fee_percent: parseFloat(newSettings.swap_fee_percent.toString()),
+        investor_share_percent: parseFloat(newSettings.investor_share_percent.toString())
+      };
+      
+      return {
+        success: true,
+        message: 'Swap settings initialized and retrieved successfully',
+        data: formattedSettings
+      };
+    }
+
+    // Convert decimal strings to numbers
+    const formattedSettings = {
+      ...settings,
+      swap_fee_percent: parseFloat(settings.swap_fee_percent.toString()),
+      investor_share_percent: parseFloat(settings.investor_share_percent.toString())
+    };
+
+    return {
+      success: true,
+      message: 'Swap settings retrieved successfully',
+      data: formattedSettings
+    };
+  }
+
+  // Update swap settings
+  async updateSwapSettings(updateSwapSettingDto: UpdateSwapSettingDto) {
+    // Get current settings to validate
+    const existingSettings = await this.swapSettingsRepository.findOne({
+      where: {}
+    });
+
+    // Prepare the values to validate (use current values if not provided in update)
+    const currentSwapFee = existingSettings ? parseFloat(existingSettings.swap_fee_percent.toString()) : 3.00;
+    const currentInvestorShare = existingSettings ? parseFloat(existingSettings.investor_share_percent.toString()) : 2.00;
+    
+    const newSwapFee = updateSwapSettingDto.swap_fee_percent !== undefined ? updateSwapSettingDto.swap_fee_percent : currentSwapFee;
+    const newInvestorShare = updateSwapSettingDto.investor_share_percent !== undefined ? updateSwapSettingDto.investor_share_percent : currentInvestorShare;
+
+    // Validate that investor_share_percent is not greater than or equal to swap_fee_percent
+    if (newInvestorShare >= newSwapFee) {
+      throw new BadRequestException('Investor share percentage must be less than swap fee percentage');
+    }
+
+    if (!existingSettings) {
+      // Auto initialize if not exists
+      await this.initializeSwapSettings();
+      const newSettings = await this.swapSettingsRepository.findOne({
+        where: {}
+      });
+      
+      if (!newSettings) {
+        throw new BadRequestException('Failed to initialize swap settings');
+      }
+      
+      // Update the newly created settings
+      await this.swapSettingsRepository.update(
+        { swap_setting_id: newSettings.swap_setting_id },
+        updateSwapSettingDto
+      );
+      
+      const updatedSettings = await this.swapSettingsRepository.findOne({
+        where: { swap_setting_id: newSettings.swap_setting_id }
+      });
+
+      if (!updatedSettings) {
+        throw new BadRequestException('Failed to retrieve updated settings');
+      }
+
+      // Convert decimal strings to numbers
+      const formattedSettings = {
+        ...updatedSettings,
+        swap_fee_percent: parseFloat(updatedSettings.swap_fee_percent.toString()),
+        investor_share_percent: parseFloat(updatedSettings.investor_share_percent.toString())
+      };
+
+      return {
+        success: true,
+        message: 'Swap settings initialized and updated successfully',
+        data: formattedSettings
+      };
+    }
+
+    await this.swapSettingsRepository.update(
+      { swap_setting_id: existingSettings.swap_setting_id },
+      updateSwapSettingDto
+    );
+
+    const updatedSettings = await this.swapSettingsRepository.findOne({
+      where: { swap_setting_id: existingSettings.swap_setting_id }
+    });
+
+    if (!updatedSettings) {
+      throw new BadRequestException('Failed to retrieve updated settings');
+    }
+
+    // Convert decimal strings to numbers
+    const formattedSettings = {
+      ...updatedSettings,
+      swap_fee_percent: parseFloat(updatedSettings.swap_fee_percent.toString()),
+      investor_share_percent: parseFloat(updatedSettings.investor_share_percent.toString())
+    };
+
+    return {
+      success: true,
+      message: 'Swap settings updated successfully',
+      data: formattedSettings
+    };
+  }
+
+  // Get swap investors statistics
+  async getSwapInvestorsStats() {
+    // Get total investors count
+    const totalInvestors = await this.swapInvestorsRepository.count();
+
+    // Get active investors count
+    const activeInvestors = await this.swapInvestorsRepository.count({
+      where: { active: true }
+    });
+
+    // Get total amount (sum of amount_usd)
+    const totalAmountResult = await this.swapInvestorsRepository
+      .createQueryBuilder('investor')
+      .select('SUM(investor.amount_usd)', 'totalAmount')
+      .getRawOne();
+
+    const totalAmount = totalAmountResult?.totalAmount || 0;
+
+    // Get current swap fee from settings
+    const swapSettings = await this.swapSettingsRepository.findOne({
+      where: {}
+    });
+
+    const swapFee = swapSettings ? parseFloat(swapSettings.swap_fee_percent.toString()) : 3.00;
+
+    return {
+      success: true,
+      message: 'Swap investors statistics retrieved successfully',
+      data: {
+        totalInvestors,
+        activeInvestors,
+        totalAmount: parseFloat(totalAmount.toString()),
+        swapFee
+      }
+    };
+  }
+
+  // Get swap investor rewards list
+  async getSwapInvestorRewards(
+    page: number = 1,
+    limit: number = 20,
+    search?: string,
+    investor_id?: number,
+    swap_order_id?: number
+  ) {
+    const queryBuilder = this.swapInvestorRewardRepository.createQueryBuilder('reward')
+      .leftJoinAndSelect('reward.swapOrder', 'swapOrder')
+      .leftJoin('swap_investors', 'investor', 'investor.swap_investor_id = reward.investor_id')
+      .addSelect('investor.wallet_address', 'investor_wallet_address');
+
+    // Apply filters
+    if (search) {
+      queryBuilder.andWhere('(investor.wallet_address ILIKE :search OR CAST(reward.investor_id AS TEXT) ILIKE :search)', { 
+        search: `%${search}%` 
+      });
+    }
+
+    if (investor_id) {
+      queryBuilder.andWhere('reward.investor_id = :investor_id', { investor_id });
+    }
+
+    if (swap_order_id) {
+      queryBuilder.andWhere('reward.swap_order_id = :swap_order_id', { swap_order_id });
+    }
+
+    // Get total count
+    const total = await queryBuilder.getCount();
+
+    // Apply pagination
+    const offset = (page - 1) * limit;
+    const rewards = await queryBuilder
+      .orderBy('reward.created_at', 'DESC')
+      .skip(offset)
+      .take(limit)
+      .getRawAndEntities();
+
+    // Format the response
+    const formattedRewards = rewards.entities.map((reward, index) => {
+      const rawData = rewards.raw[index];
+      return {
+        ...reward,
+        investor_wallet_address: rawData.investor_wallet_address,
+        reward_sol_amount: parseFloat(reward.reward_sol_amount.toString())
+      };
+    });
+
+    return {
+      success: true,
+      message: 'Swap investor rewards retrieved successfully',
+      data: formattedRewards,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
+    };
+  }
 }

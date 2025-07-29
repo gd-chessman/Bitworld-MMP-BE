@@ -21,6 +21,7 @@ import { WalletReferent } from '../referral/entities/wallet-referent.entity';
 import { ReferentLevelReward } from '../referral/entities/referent-level-rewards.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { CreateInvestorDto } from './dto/create-investor.dto';
+import { SwapSettingDto, UpdateSwapSettingDto } from './dto/swap-setting.dto';
 import { ConflictException, HttpException, HttpStatus, UnauthorizedException } from '@nestjs/common';
 
 @ApiTags('admin')
@@ -190,9 +191,10 @@ export class AdminController {
     @Query('search') search?: string,
     @Query('wallet_auth') wallet_auth?: string,
     @Query('wallet_type') wallet_type?: 'main' | 'all',
-    @Query('isBittworld') isBittworld?: string
+    @Query('isBittworld') isBittworld?: string,
+    @Query('bittworld_uid') bittworld_uid?: string
   ): Promise<{ data: ListWallet[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
-    return this.adminService.getListWallets(page, limit, search, wallet_auth, wallet_type, req.user, isBittworld);
+    return this.adminService.getListWallets(page, limit, search, wallet_auth, wallet_type, req.user, isBittworld, bittworld_uid);
   }
 
   @UseGuards(JwtAuthAdminGuard)
@@ -524,6 +526,49 @@ export class AdminController {
     @Query('search') search?: string
   ) {
     return await this.adminService.getInvestors(page, limit, search);
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Get('swap-settings')
+  @ApiOperation({ summary: 'Get swap settings (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Swap settings retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can view swap settings' })
+  async getSwapSettings() {
+    return await this.adminService.getSwapSettings();
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Put('swap-settings')
+  @ApiOperation({ summary: 'Update swap settings (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Swap settings updated successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid input data' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can update swap settings' })
+  async updateSwapSettings(@Body() updateSwapSettingDto: UpdateSwapSettingDto) {
+    return await this.adminService.updateSwapSettings(updateSwapSettingDto);
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Get('swap-investors/stats')
+  @ApiOperation({ summary: 'Get swap investors statistics (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Swap investors statistics retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can view statistics' })
+  async getSwapInvestorsStats() {
+    return await this.adminService.getSwapInvestorsStats();
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Get('swap-investor-rewards')
+  @ApiOperation({ summary: 'Get list of swap investor rewards (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Swap investor rewards retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can view rewards' })
+  async getSwapInvestorRewards(
+    @Query('page', new ParseIntPipe({ optional: true })) page: number = 1,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 20,
+    @Query('search') search?: string,
+    @Query('investor_id', new ParseIntPipe({ optional: true })) investor_id?: number,
+    @Query('swap_order_id', new ParseIntPipe({ optional: true })) swap_order_id?: number
+  ) {
+    return await this.adminService.getSwapInvestorRewards(page, limit, search, investor_id, swap_order_id);
   }
 
 }
