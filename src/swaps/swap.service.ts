@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Connection, PublicKey, Transaction, sendAndConfirmTransaction, Keypair, SystemProgram } from '@solana/web3.js';
 import { SwapOrder, SwapOrderType, SwapOrderStatus } from './entities/swap-order.entity';
+import { SwapSettings } from './entities/swap-setting.entity';
 import { ListWallet } from '../telegram-wallets/entities/list-wallet.entity';
 import { CreateSwapDto } from './dto/create-swap.dto';
 import { TOKEN_PROGRAM_ID, getMint, createMintToInstruction, createTransferInstruction, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from '@solana/spl-token';
@@ -32,6 +33,8 @@ export class SwapService {
     private swapOrderRepository: Repository<SwapOrder>,
     @InjectRepository(ListWallet)
     private listWalletRepository: Repository<ListWallet>,
+    @InjectRepository(SwapSettings)
+    private swapSettingsRepository: Repository<SwapSettings>,
     private configService: ConfigService,
   ) {
     const rpcUrl = this.configService.get<string>('SOLANA_RPC_URL');
@@ -152,40 +155,66 @@ export class SwapService {
       // 4. Lấy giá SOL hiện tại
       const solPriceUSD = await this.getSolPriceUSD();
 
-      // 5. Tính toán output amount và exchange rate
+      // 5. Lấy swap settings để lấy phí swap
+      const swapSettings = await this.swapSettingsRepository.findOne({
+        where: {},
+        order: { swap_setting_id: 'DESC' }
+      });
+
+      if (!swapSettings) {
+        throw new BadRequestException('Swap settings not found');
+      }
+
+      const swapFeePercent = Number(swapSettings.swap_fee_percent);
+
+      // 6. Tính toán output amount và exchange rate (sau khi trừ phí)
       let outputAmount: number;
       let exchangeRate: number;
+      let feeAmount: number;
 
       switch (createSwapDto.swap_type) {
         case SwapOrderType.USDT_TO_SOL:
           // USDT sang SOL: 1 USDT = 1/SOL_PRICE SOL
           exchangeRate = 1 / solPriceUSD;
-          outputAmount = createSwapDto.input_amount * exchangeRate;
+          const rawOutputAmount = createSwapDto.input_amount * exchangeRate;
+          
+          // Tính phí swap
+          feeAmount = rawOutputAmount * (swapFeePercent / 100);
+          
+          // Output amount sau khi trừ phí
+          outputAmount = rawOutputAmount - feeAmount;
           break;
         
         case SwapOrderType.SOL_TO_USDT:
           // SOL sang USDT: 1 SOL = SOL_PRICE USDT
           exchangeRate = solPriceUSD;
-          outputAmount = createSwapDto.input_amount * exchangeRate;
+          const rawOutputAmountSol = createSwapDto.input_amount * exchangeRate;
+          
+          // Tính phí swap
+          feeAmount = rawOutputAmountSol * (swapFeePercent / 100);
+          
+          // Output amount sau khi trừ phí
+          outputAmount = rawOutputAmountSol - feeAmount;
           break;
         
         default:
           throw new BadRequestException(`Unsupported swap type: ${createSwapDto.swap_type}`);
       }
 
-      // 6. Tạo swap order với trạng thái PENDING
+      // 7. Tạo swap order với trạng thái PENDING
       const swapOrder = this.swapOrderRepository.create({
         wallet_id: walletId,
         swap_type: createSwapDto.swap_type,
         input_amount: createSwapDto.input_amount,
         output_amount: outputAmount,
         exchange_rate: exchangeRate,
+        fee_amount: feeAmount,
         status: SwapOrderStatus.PENDING
       });
 
       const savedOrder = await this.swapOrderRepository.save(swapOrder);
 
-      // 7. Kiểm tra balance của user
+      // 8. Kiểm tra balance của user
       let hasBalance = false;
 
       switch (createSwapDto.swap_type) {
@@ -218,7 +247,7 @@ export class SwapService {
         throw new BadRequestException('Insufficient balance');
       }
 
-      // 8. Thực hiện swap transaction
+      // 9. Thực hiện swap transaction
       try {
         const transaction = new Transaction();
 
@@ -274,7 +303,7 @@ export class SwapService {
               })
             );
             
-            this.logger.log(`USDT to SOL swap: User sent ${createSwapDto.input_amount} USDT, will receive ${outputAmount} SOL`);
+            this.logger.log(`USDT to SOL swap: User sent ${createSwapDto.input_amount} USDT, will receive ${outputAmount} SOL (fee: ${feeAmount} SOL, ${swapFeePercent}%)`);
             break;
 
           case SwapOrderType.SOL_TO_USDT:
@@ -329,7 +358,7 @@ export class SwapService {
               )
             );
             
-            this.logger.log(`SOL to USDT swap: User sent ${createSwapDto.input_amount} SOL, will receive ${outputAmount} USDT`);
+            this.logger.log(`SOL to USDT swap: User sent ${createSwapDto.input_amount} SOL, will receive ${outputAmount} USDT (fee: ${feeAmount} USDT, ${swapFeePercent}%)`);
             
             break;
         }
@@ -368,12 +397,12 @@ export class SwapService {
           }
         );
 
-        // 9. Cập nhật order thành COMPLETED
+        // 10. Cập nhật order thành COMPLETED
         savedOrder.status = SwapOrderStatus.COMPLETED;
         savedOrder.transaction_hash = txHash;
         await this.swapOrderRepository.save(savedOrder);
 
-        this.logger.log(`Swap completed successfully: ${createSwapDto.swap_type}, Amount: ${createSwapDto.input_amount}, Output: ${outputAmount}, TX: ${txHash}`);
+        this.logger.log(`Swap completed successfully: ${createSwapDto.swap_type}, Amount: ${createSwapDto.input_amount}, Output: ${outputAmount}, Fee: ${feeAmount} (${swapFeePercent}%), TX: ${txHash}`);
 
         return {
           success: true,
@@ -384,6 +413,8 @@ export class SwapService {
             input_amount: savedOrder.input_amount,
             output_amount: savedOrder.output_amount,
             exchange_rate: savedOrder.exchange_rate,
+            swap_fee_percent: swapFeePercent,
+            fee_amount: feeAmount,
             status: savedOrder.status,
             transaction_hash: savedOrder.transaction_hash,
             error_message: savedOrder.error_message,
@@ -393,7 +424,7 @@ export class SwapService {
         };
 
       } catch (error) {
-        // 10. Xử lý lỗi và cập nhật order
+        // 11. Xử lý lỗi và cập nhật order
         savedOrder.status = SwapOrderStatus.FAILED;
         savedOrder.error_message = error.message;
         await this.swapOrderRepository.save(savedOrder);
