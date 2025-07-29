@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsOptional, IsEnum } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export enum PoolSortField {
     CREATION_DATE = 'creationDate',
@@ -30,7 +31,8 @@ export class GetPoolsDto {
     })
     @IsOptional()
     @IsEnum(PoolFilterType)
-    filterType?: PoolFilterType = PoolFilterType.ALL;
+    @Transform(({ value }) => value || PoolFilterType.ALL)
+    filterType?: PoolFilterType;
 
     @ApiProperty({
         description: 'Trường để sắp xếp danh sách pools',

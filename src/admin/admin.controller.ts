@@ -20,6 +20,7 @@ import { ReferentSetting } from '../referral/entities/referent-setting.entity';
 import { WalletReferent } from '../referral/entities/wallet-referent.entity';
 import { ReferentLevelReward } from '../referral/entities/referent-level-rewards.entity';
 import { CreateUserDto } from './dto/create-user.dto';
+import { CreateInvestorDto } from './dto/create-investor.dto';
 import { ConflictException, HttpException, HttpStatus, UnauthorizedException } from '@nestjs/common';
 
 @ApiTags('admin')
@@ -499,6 +500,30 @@ export class AdminController {
     @Request() req
   ) {
     return await this.adminService.deleteUser(id, req.user);
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Post('swap-investors')
+  @ApiOperation({ summary: 'Create new investor (Admin only)' })
+  @ApiResponse({ status: 201, description: 'Investor created successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid input data' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can create investors' })
+  @ApiResponse({ status: 409, description: 'Investor with this wallet address already exists' })
+  async createInvestor(@Body() createInvestorDto: CreateInvestorDto, @Request() req) {
+    return await this.adminService.createInvestor(createInvestorDto, req.user);
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Get('swap-investors')
+  @ApiOperation({ summary: 'Get list of investors (Admin only)' })
+  @ApiResponse({ status: 200, description: 'List of investors retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can view investors' })
+  async getInvestors(
+    @Query('page', new ParseIntPipe({ optional: true })) page: number = 1,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 20,
+    @Query('search') search?: string
+  ) {
+    return await this.adminService.getInvestors(page, limit, search);
   }
 
 }

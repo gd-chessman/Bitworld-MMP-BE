@@ -18,6 +18,9 @@ import { WalletReferent } from '../referral/entities/wallet-referent.entity';
 import { ReferentLevelReward } from '../referral/entities/referent-level-rewards.entity';
 import { BgRefService } from '../referral/bg-ref.service';
 import { CreateUserDto } from './dto/create-user.dto';
+import { SwapInvestors } from '../swaps/entities/swap-investor.entity';
+import { CreateInvestorDto } from './dto/create-investor.dto';
+import { PublicKey } from '@solana/web3.js';
 
 @Injectable()
 export class AdminService implements OnModuleInit {
@@ -38,6 +41,8 @@ export class AdminService implements OnModuleInit {
     private tradingOrderRepository: Repository<TradingOrder>,
     @InjectRepository(ReferentLevelReward)
     private referentLevelRewardRepository: Repository<ReferentLevelReward>,
+    @InjectRepository(SwapInvestors)
+    private swapInvestorsRepository: Repository<SwapInvestors>,
     private jwtService: JwtService,
     private bgRefService: BgRefService,
     private dataSource: DataSource,
@@ -2057,6 +2062,86 @@ export class AdminService implements OnModuleInit {
     }
     await this.userAdminRepository.remove(user);
     return { message: 'User deleted successfully' };
+  }
+
+  // Create investor
+  async createInvestor(createInvestorDto: CreateInvestorDto, currentUser: UserAdmin) {
+    if (currentUser.role !== AdminRole.ADMIN) {
+      throw new ForbiddenException('Only admin can create investors');
+    }
+
+    // Validate Solana wallet address
+    try {
+      new PublicKey(createInvestorDto.wallet_address);
+    } catch (error) {
+      throw new BadRequestException('Invalid Solana wallet address format');
+    }
+
+    // Kiểm tra xem investor đã tồn tại chưa
+    const existingInvestor = await this.swapInvestorsRepository.findOne({
+      where: { wallet_address: createInvestorDto.wallet_address }
+    });
+
+    if (existingInvestor) {
+      throw new ConflictException('Investor with this wallet address already exists');
+    }
+
+    // Tạo investor mới
+    const investor = this.swapInvestorsRepository.create({
+      wallet_address: createInvestorDto.wallet_address,
+      coins: [], // Mảng rỗng khi tạo mới
+      amount_sol: 0,
+      amount_usdt: 0,
+      amount_usd: 0,
+      active: true
+    });
+
+    const savedInvestor = await this.swapInvestorsRepository.save(investor);
+
+    return {
+      success: true,
+      message: 'Investor created successfully',
+      data: savedInvestor
+    };
+  }
+
+
+
+  // Get investors list
+  async getInvestors(
+    page: number = 1,
+    limit: number = 20,
+    search?: string
+  ) {
+    const queryBuilder = this.swapInvestorsRepository.createQueryBuilder('investor');
+
+    // Apply filters
+    if (search) {
+      queryBuilder.where('investor.wallet_address ILIKE :search', { search: `%${search}%` });
+    }
+
+    // Get total count
+    const total = await queryBuilder.getCount();
+
+    // Apply pagination
+    const offset = (page - 1) * limit;
+    const investors = await queryBuilder
+      .orderBy('investor.created_at', 'DESC')
+      .skip(offset)
+      .take(limit)
+      .getMany();
+
+    return {
+      success: true,
+      message: 'Investors retrieved successfully',
+      data: investors,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
+    };
   }
 
 }

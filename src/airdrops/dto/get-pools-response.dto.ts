@@ -63,6 +63,12 @@ export class PoolInfoDto {
     status: string;
 
     @ApiProperty({
+        description: 'Solana address của ví khởi tạo pool',
+        example: '4d9d4hWrrDDgqGiQctkcPwyinZhozyj2xaPRi9MSz44v'
+    })
+    creatorAddress: string;
+
+    @ApiProperty({
         description: 'Thông tin stake của user hiện tại (nếu có)',
         required: false
     })

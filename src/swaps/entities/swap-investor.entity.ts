@@ -20,21 +20,41 @@ export class SwapInvestors {
   wallet_address: string;
 
   @Column({ 
-    name: 'coin', 
-    type: 'varchar', 
-    length: 50,
-    nullable: false 
+    name: 'coins', 
+    type: 'text',
+    nullable: true
   })
-  coin: string;
+  coins: string[]; // Đổi type thành array
 
   @Column({ 
-    name: 'amount', 
+    name: 'amount_sol', 
     type: 'decimal', 
     precision: 18, 
     scale: 6,
-    nullable: false 
+    nullable: false,
+    default: 0
   })
-  amount: number;
+  amount_sol: number;
+
+  @Column({ 
+    name: 'amount_usdt', 
+    type: 'decimal', 
+    precision: 18, 
+    scale: 6,
+    nullable: false,
+    default: 0
+  })
+  amount_usdt: number;
+
+  @Column({ 
+    name: 'amount_usd', 
+    type: 'decimal', 
+    precision: 18, 
+    scale: 6,
+    nullable: false,
+    default: 0
+  })
+  amount_usd: number;
 
   @Column({ 
     name: 'active', 

@@ -483,10 +483,12 @@ export class AirdropsService {
 
     async getPools(walletId: number, query: GetPoolsDto = {}): Promise<PoolInfoDto[]> {
         try {
-            // 1. Xác định filter type và trường sắp xếp
+            // 1. Xác định filter type và trường sắp xếp với validation
             const filterType = query.filterType || PoolFilterType.ALL;
             const sortBy = query.sortBy || PoolSortField.CREATION_DATE;
             const sortOrder = query.sortOrder || PoolSortOrder.DESC;
+
+            this.logger.log(`Filter: ${filterType}, Sort: ${sortBy}, Order: ${sortOrder}`);
 
             // 2. Tạo order object cho TypeORM
             let orderObject: any = {};
@@ -510,63 +512,66 @@ export class AirdropsService {
                     orderObject = { apl_creation_date: 'DESC' };
             }
 
-            // 3. Tạo where condition dựa trên filter type
-            let whereCondition: any = {
-                apl_status: AirdropPoolStatus.ACTIVE
-            };
+            // 3. Xử lý filter và lấy pools
+            let pools: AirdropListPool[] = [];
 
             switch (filterType) {
+                case PoolFilterType.ALL:
+                    // Lấy tất cả pools đang hoạt động
+                    pools = await this.airdropListPoolRepository.find({
+                        where: { apl_status: AirdropPoolStatus.ACTIVE },
+                        order: orderObject
+                    });
+                    break;
+
                 case PoolFilterType.CREATED:
                     // Chỉ lấy pools do user tạo
-                    whereCondition.alp_originator = walletId;
-                    break;
-                case PoolFilterType.JOINED:
-                    // Lấy pools mà user đã tham gia (không phải creator)
-                    // Sẽ xử lý sau khi lấy tất cả pools
-                    break;
-                case PoolFilterType.ALL:
-                default:
-                    // Lấy tất cả pools (mặc định)
-                    break;
-            }
-
-            // 4. Lấy pools theo điều kiện
-            let pools = await this.airdropListPoolRepository.find({
-                where: whereCondition,
-                order: orderObject
-            });
-
-            // 5. Nếu filter là JOINED, lọc thêm pools mà user đã tham gia
-            if (filterType === PoolFilterType.JOINED) {
-                const joinedPoolIds = await this.airdropPoolJoinRepository
-                    .createQueryBuilder('join')
-                    .select('join.apj_pool_id')
-                    .where('join.apj_member = :walletId', { walletId })
-                    .andWhere('join.apj_status = :status', { status: AirdropPoolJoinStatus.ACTIVE })
-                    .getRawMany();
-
-                const joinedIds = joinedPoolIds.map(item => item.join_apj_pool_id);
-                
-                if (joinedIds.length > 0) {
                     pools = await this.airdropListPoolRepository.find({
                         where: {
-                            alp_id: In(joinedIds),
-                            apl_status: AirdropPoolStatus.ACTIVE
+                            apl_status: AirdropPoolStatus.ACTIVE,
+                            alp_originator: walletId
                         },
                         order: orderObject
                     });
-                } else {
-                    pools = []; // Không có pool nào user đã tham gia
-                }
+                    break;
+
+                case PoolFilterType.JOINED:
+                    // Lấy pools mà user đã tham gia (không phải creator)
+                    // Sử dụng JOIN để tối ưu performance
+                    const joinedPools = await this.airdropListPoolRepository
+                        .createQueryBuilder('pool')
+                        .innerJoin('airdrop_pool_joins', 'join', 'join.apj_pool_id = pool.alp_id')
+                        .where('pool.apl_status = :status', { status: AirdropPoolStatus.ACTIVE })
+                        .andWhere('join.apj_member = :walletId', { walletId })
+                        .andWhere('join.apj_status = :joinStatus', { joinStatus: AirdropPoolJoinStatus.ACTIVE })
+                        .orderBy(`pool.${this.getOrderByField(sortBy)}`, sortOrder.toUpperCase() as 'ASC' | 'DESC')
+                        .getMany();
+                    
+                    pools = joinedPools;
+                    break;
+
+                default:
+                    // Fallback về ALL nếu filterType không hợp lệ
+                    this.logger.warn(`Invalid filterType: ${filterType}, falling back to ALL`);
+                    pools = await this.airdropListPoolRepository.find({
+                        where: { apl_status: AirdropPoolStatus.ACTIVE },
+                        order: orderObject
+                    });
+                    break;
             }
 
             const poolsWithUserInfo: PoolInfoDto[] = [];
 
             for (const pool of pools) {
-                // 2. Kiểm tra xem user có phải là creator của pool không
+                // 2. Lấy thông tin ví khởi tạo pool
+                const creatorWallet = await this.listWalletRepository.findOne({
+                    where: { wallet_id: pool.alp_originator }
+                });
+
+                // 3. Kiểm tra xem user có phải là creator của pool không
                 const isCreator = pool.alp_originator === walletId;
 
-                // 3. Lấy thông tin stake của user trong pool này
+                // 4. Lấy thông tin stake của user trong pool này
                 const userStakes = await this.airdropPoolJoinRepository.find({
                     where: {
                         apj_pool_id: pool.alp_id,
@@ -597,7 +602,8 @@ export class AirdropsService {
                     totalVolume: Number(pool.apl_volume),
                     creationDate: pool.apl_creation_date,
                     endDate: pool.apl_end_date,
-                    status: pool.apl_status
+                    status: pool.apl_status,
+                    creatorAddress: creatorWallet?.wallet_solana_address || ''
                 };
 
                 // 7. Thêm thông tin stake của user nếu có
@@ -668,7 +674,12 @@ export class AirdropsService {
                 throw new Error('Pool không tồn tại');
             }
 
-            // 2. Kiểm tra xem user có phải là creator của pool không
+            // 2. Lấy thông tin ví khởi tạo pool
+            const creatorWallet = await this.listWalletRepository.findOne({
+                where: { wallet_id: pool.alp_originator }
+            });
+
+            // 3. Kiểm tra xem user có phải là creator của pool không
             const isCreator = pool.alp_originator === walletId;
 
             // 3. Lấy thông tin stake của user trong pool này
@@ -705,7 +716,8 @@ export class AirdropsService {
                 creationDate: pool.apl_creation_date,
                 endDate: pool.apl_end_date,
                 status: pool.apl_status,
-                transactionHash: pool.apl_hash
+                transactionHash: pool.apl_hash,
+                creatorAddress: creatorWallet?.wallet_solana_address || ''
             };
 
             // 7. Thêm thông tin stake của user nếu có
@@ -998,5 +1010,22 @@ export class AirdropsService {
             .replace(/^-+|-+$/g, '');
         
         return `${baseSlug}-${id}`;
+    }
+
+    private getOrderByField(sortBy: PoolSortField): string {
+        switch (sortBy) {
+            case PoolSortField.CREATION_DATE:
+                return 'apl_creation_date';
+            case PoolSortField.NAME:
+                return 'alp_name';
+            case PoolSortField.MEMBER_COUNT:
+                return 'alp_member_num';
+            case PoolSortField.TOTAL_VOLUME:
+                return 'apl_volume';
+            case PoolSortField.END_DATE:
+                return 'apl_end_date';
+            default:
+                return 'apl_creation_date';
+        }
     }
 } 

@@ -21,6 +21,7 @@ import { WalletReferent } from '../referral/entities/wallet-referent.entity';
 import { ReferentLevelReward } from 'src/referral/entities/referent-level-rewards.entity';
 import { ReferralModule } from '../referral/referral.module';
 import { TradingOrder } from '../trade/entities/trading-order.entity';
+import { SwapInvestors } from '../swaps/entities/swap-investor.entity';
 
 @Module({
   imports: [
@@ -33,7 +34,8 @@ import { TradingOrder } from '../trade/entities/trading-order.entity';
       ReferentSetting,
       WalletReferent,
       ReferentLevelReward,
-      TradingOrder
+      TradingOrder,
+      SwapInvestors
     ]),
     PassportModule.register({ defaultStrategy: 'admin-jwt' }),
     JwtModule.register({

@@ -359,6 +359,7 @@ Content-Type: application/json
       "creationDate": "2024-01-15T10:30:00.000Z",
       "endDate": "2025-01-15T10:30:00.000Z",
       "status": "active",
+      "creatorAddress": "4d9d4hWrrDDgqGiQctkcPwyinZhozyj2xaPRi9MSz44v",
       "userStakeInfo": {
         "isCreator": false,
         "joinStatus": "active",
@@ -371,7 +372,7 @@ Content-Type: application/json
 ```
 
 **Business Logic:**
-1. **Xác định filter type:**
+1. **Xác định filter type: filterType**  
    - `all`: Lấy tất cả pools có trạng thái `active`
    - `created`: Chỉ lấy pools do user tạo (alp_originator = wallet_id)
    - `joined`: Lấy pools mà user đã tham gia (có record trong airdrop_pool_joins)
@@ -440,6 +441,7 @@ GET /api/v1/airdrops/pool/1
     "endDate": "2025-01-15T10:30:00.000Z",
     "status": "active",
     "transactionHash": "5J7X...abc123",
+    "creatorAddress": "4d9d4hWrrDDgqGiQctkcPwyinZhozyj2xaPRi9MSz44v",
     "userStakeInfo": {
       "isCreator": false,
       "joinStatus": "active",
@@ -468,6 +470,7 @@ GET /api/v1/airdrops/pool/1
     "endDate": "2025-01-15T10:30:00.000Z",
     "status": "active",
     "transactionHash": "5J7X...abc123",
+    "creatorAddress": "4d9d4hWrrDDgqGiQctkcPwyinZhozyj2xaPRi9MSz44v",
     "userStakeInfo": {
       "isCreator": true,
       "joinStatus": "creator",
