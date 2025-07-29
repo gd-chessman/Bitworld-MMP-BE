@@ -2,19 +2,19 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export class CreatePoolResponseDto {
     @ApiProperty({
-        description: 'Trạng thái thành công',
+        description: 'Success status',
         example: true
     })
     success: boolean;
 
     @ApiProperty({
-        description: 'Thông báo',
-        example: 'Tạo pool thành công'
+        description: 'Message',
+        example: 'Pool created successfully'
     })
     message: string;
 
     @ApiProperty({
-        description: 'Dữ liệu pool được tạo',
+        description: 'Created pool data',
         example: {
             poolId: 1,
             name: 'My Airdrop Pool',

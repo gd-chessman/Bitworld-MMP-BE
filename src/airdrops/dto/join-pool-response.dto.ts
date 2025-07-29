@@ -2,19 +2,19 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export class StakePoolResponseDto {
     @ApiProperty({
-        description: 'Trạng thái thành công',
+        description: 'Success status',
         example: true
     })
     success: boolean;
 
     @ApiProperty({
-        description: 'Thông báo kết quả',
-        example: 'Stake pool thành công'
+        description: 'Result message',
+        example: 'Stake pool successfully'
     })
     message: string;
 
     @ApiProperty({
-        description: 'Dữ liệu kết quả',
+        description: 'Result data',
         type: 'object',
         properties: {
             joinId: { type: 'number', example: 1 },

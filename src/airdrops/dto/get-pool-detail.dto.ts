@@ -15,7 +15,7 @@ export enum SortOrder {
 
 export class GetPoolDetailDto {
     @ApiProperty({
-        description: 'Trường để sắp xếp danh sách members',
+        description: 'Field to sort members list',
         enum: SortField,
         required: false,
         example: SortField.TOTAL_STAKED
@@ -25,7 +25,7 @@ export class GetPoolDetailDto {
     sortBy?: SortField;
 
     @ApiProperty({
-        description: 'Thứ tự sắp xếp',
+        description: 'Sort order',
         enum: SortOrder,
         required: false,
         example: SortOrder.DESC

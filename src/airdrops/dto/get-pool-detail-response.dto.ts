@@ -14,6 +14,13 @@ export class MemberInfoDto {
     solanaAddress: string;
 
     @ApiProperty({
+        description: 'Bittworld UID của member',
+        example: 'BW123456789',
+        required: false
+    })
+    bittworldUid: string | null;
+
+    @ApiProperty({
         description: 'Nickname của member',
         example: 'User123'
     })
@@ -126,6 +133,13 @@ export class PoolDetailDto {
     creatorAddress: string;
 
     @ApiProperty({
+        description: 'Bittworld UID của ví khởi tạo pool',
+        example: 'BW123456789',
+        required: false
+    })
+    creatorBittworldUid: string | null;
+
+    @ApiProperty({
         description: 'Thông tin stake của user hiện tại (nếu có)',
         required: false
     })
@@ -147,19 +161,19 @@ export class PoolDetailDto {
 
 export class GetPoolDetailResponseDto {
     @ApiProperty({
-        description: 'Trạng thái thành công',
+        description: 'Success status',
         example: true
     })
     success: boolean;
 
     @ApiProperty({
-        description: 'Thông báo kết quả',
-        example: 'Lấy thông tin pool thành công'
+        description: 'Result message',
+        example: 'Get pool details successfully'
     })
     message: string;
 
     @ApiProperty({
-        description: 'Dữ liệu chi tiết pool',
+        description: 'Pool details data',
         type: PoolDetailDto
     })
     data: PoolDetailDto;

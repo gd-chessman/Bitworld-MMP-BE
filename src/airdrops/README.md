@@ -360,6 +360,7 @@ Content-Type: application/json
       "endDate": "2025-01-15T10:30:00.000Z",
       "status": "active",
       "creatorAddress": "4d9d4hWrrDDgqGiQctkcPwyinZhozyj2xaPRi9MSz44v",
+      "creatorBittworldUid": "BW123456789",
       "userStakeInfo": {
         "isCreator": false,
         "joinStatus": "active",
@@ -471,6 +472,7 @@ GET /api/v1/airdrops/pool/1
     "status": "active",
     "transactionHash": "5J7X...abc123",
     "creatorAddress": "4d9d4hWrrDDgqGiQctkcPwyinZhozyj2xaPRi9MSz44v",
+    "creatorBittworldUid": "BW123456789",
     "userStakeInfo": {
       "isCreator": true,
       "joinStatus": "creator",
@@ -481,7 +483,8 @@ GET /api/v1/airdrops/pool/1
     "members": [
       {
         "memberId": 123456,
-        "solanaAddress": "9K8Y...abc123",
+        "solanaAddress": "4d9d4hWrrDDgqGiQctkcPwyinZhozyj2xaPRi9MSz44v",
+        "bittworldUid": "BW123456789",
         "nickname": "Creator",
         "isCreator": true,
         "joinDate": "2024-01-15T10:30:00.000Z",
@@ -492,6 +495,7 @@ GET /api/v1/airdrops/pool/1
       {
         "memberId": 789012,
         "solanaAddress": "9K8Y...def456",
+        "bittworldUid": "BW789012345",
         "nickname": "User123",
         "isCreator": false,
         "joinDate": "2024-01-16T15:30:00.000Z",

@@ -69,6 +69,13 @@ export class PoolInfoDto {
     creatorAddress: string;
 
     @ApiProperty({
+        description: 'Bittworld UID của ví khởi tạo pool',
+        example: 'BW123456789',
+        required: false
+    })
+    creatorBittworldUid: string | null;
+
+    @ApiProperty({
         description: 'Thông tin stake của user hiện tại (nếu có)',
         required: false
     })
@@ -82,19 +89,19 @@ export class PoolInfoDto {
 
 export class GetPoolsResponseDto {
     @ApiProperty({
-        description: 'Trạng thái thành công',
+        description: 'Success status',
         example: true
     })
     success: boolean;
 
     @ApiProperty({
-        description: 'Thông báo kết quả',
-        example: 'Lấy danh sách pool thành công'
+        description: 'Result message',
+        example: 'Get pools list successfully'
     })
     message: string;
 
     @ApiProperty({
-        description: 'Dữ liệu danh sách pool',
+        description: 'Pools list data',
         type: [PoolInfoDto]
     })
     data: PoolInfoDto[];

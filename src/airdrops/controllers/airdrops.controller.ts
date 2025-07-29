@@ -23,37 +23,37 @@ export class AirdropsController {
     @Post('create-pool')
     @UseInterceptors(FileInterceptor('logo'))
     @ApiOperation({
-        summary: 'Tạo airdrop pool mới',
-        description: 'Tạo một airdrop pool mới với token X. Hỗ trợ upload logo file hoặc URL. Yêu cầu số lượng tối thiểu 1,000,000 token X.'
+        summary: 'Create new airdrop pool',
+        description: 'Create a new airdrop pool with token X. Supports logo file upload or URL. Requires minimum 1,000,000 token X.'
     })
     @ApiConsumes('multipart/form-data')
     @ApiResponse({
         status: HttpStatus.OK,
-        description: 'Tạo pool thành công',
+        description: 'Pool created successfully',
         type: CreatePoolResponseDto
     })
     @ApiResponse({
         status: HttpStatus.BAD_REQUEST,
-        description: 'Dữ liệu không hợp lệ hoặc số dư không đủ'
+        description: 'Invalid data or insufficient balance'
     })
     @ApiResponse({
         status: HttpStatus.UNAUTHORIZED,
-        description: 'Không có quyền truy cập'
+        description: 'Unauthorized access'
     })
     @ApiResponse({
         status: HttpStatus.INTERNAL_SERVER_ERROR,
-        description: 'Lỗi server'
+        description: 'Server error'
     })
     async createPool(
         @Request() req: any, 
         @Body() createPoolDto: CreatePoolDto,
         @UploadedFile() logoFile?: Express.Multer.File
     ) {
-        // Lấy wallet_id từ JWT token
+        // Get wallet_id from JWT token
         const walletId = req.user.wallet_id;
         
         if (!walletId) {
-            throw new Error('Không tìm thấy wallet_id trong token');
+            throw new Error('Wallet ID not found in token');
         }
 
         return await this.airdropsService.createPool(walletId, createPoolDto, logoFile);
@@ -61,32 +61,32 @@ export class AirdropsController {
 
     @Post('stake-pool')
     @ApiOperation({
-        summary: 'Stake vào airdrop pool',
-        description: 'Stake token X vào một airdrop pool đã tồn tại. Có thể stake nhiều lần.'
+        summary: 'Stake into airdrop pool',
+        description: 'Stake token X into an existing airdrop pool. Can stake multiple times.'
     })
     @ApiResponse({
         status: HttpStatus.OK,
-        description: 'Stake pool thành công',
+        description: 'Stake pool successfully',
         type: StakePoolResponseDto
     })
     @ApiResponse({
         status: HttpStatus.BAD_REQUEST,
-        description: 'Dữ liệu không hợp lệ, pool không tồn tại, hoặc số dư không đủ'
+        description: 'Invalid data, pool not found, or insufficient balance'
     })
     @ApiResponse({
         status: HttpStatus.UNAUTHORIZED,
-        description: 'Không có quyền truy cập'
+        description: 'Unauthorized access'
     })
     @ApiResponse({
         status: HttpStatus.INTERNAL_SERVER_ERROR,
-        description: 'Lỗi server'
+        description: 'Server error'
     })
     async stakePool(@Request() req: any, @Body() stakePoolDto: StakePoolDto) {
-        // Lấy wallet_id từ JWT token
+        // Get wallet_id from JWT token
         const walletId = req.user.wallet_id;
         
         if (!walletId) {
-            throw new Error('Không tìm thấy wallet_id trong token');
+            throw new Error('Wallet ID not found in token');
         }
 
         return await this.airdropsService.stakePool(walletId, stakePoolDto);
@@ -94,35 +94,35 @@ export class AirdropsController {
 
     @Get('pools')
     @ApiOperation({
-        summary: 'Lấy danh sách airdrop pools',
-        description: 'Lấy danh sách airdrop pools với bộ lọc và sắp xếp. Hỗ trợ lọc theo: tất cả pools, pools đã tạo, pools đã tham gia.'
+        summary: 'Get airdrop pools list',
+        description: 'Get list of airdrop pools with filtering and sorting. Supports filtering by: all pools, created pools, joined pools.'
     })
     @ApiResponse({
         status: HttpStatus.OK,
-        description: 'Lấy danh sách pool thành công',
+        description: 'Get pools list successfully',
         type: GetPoolsResponseDto
     })
     @ApiResponse({
         status: HttpStatus.UNAUTHORIZED,
-        description: 'Không có quyền truy cập'
+        description: 'Unauthorized access'
     })
     @ApiResponse({
         status: HttpStatus.INTERNAL_SERVER_ERROR,
-        description: 'Lỗi server'
+        description: 'Server error'
     })
     async getPools(@Query() query: GetPoolsDto, @Request() req: any): Promise<GetPoolsResponseDto> {
-        // Lấy wallet_id từ JWT token
+        // Get wallet_id from JWT token
         const walletId = req.user.wallet_id;
         
         if (!walletId) {
-            throw new Error('Không tìm thấy wallet_id trong token');
+            throw new Error('Wallet ID not found in token');
         }
 
         const pools = await this.airdropsService.getPools(walletId, query);
 
         return {
             success: true,
-            message: 'Lấy danh sách pool thành công',
+            message: 'Get pools list successfully',
             data: pools
         };
     }
@@ -131,30 +131,30 @@ export class AirdropsController {
     @UseGuards(AirdropJwtAuthGuard)
     @ApiBearerAuth()
     @ApiOperation({
-        summary: 'Lấy thông tin chi tiết airdrop pool',
-        description: 'Lấy thông tin chi tiết của một airdrop pool theo ID hoặc slug. Nếu user là creator, sẽ hiển thị thêm danh sách members.'
+        summary: 'Get airdrop pool details',
+        description: 'Get detailed information of an airdrop pool by ID or slug. If user is creator, will show additional members list.'
     })
     @ApiParam({
         name: 'idOrSlug',
-        description: 'ID hoặc slug của pool (ví dụ: 1 hoặc "my-airdrop-pool-1")',
+        description: 'ID or slug of the pool (e.g., 1 or "my-airdrop-pool-1")',
         example: 'my-airdrop-pool-1'
     })
     @ApiResponse({
         status: HttpStatus.OK,
-        description: 'Lấy thông tin pool thành công',
+        description: 'Get pool details successfully',
         type: GetPoolDetailResponseDto
     })
     @ApiResponse({
         status: HttpStatus.BAD_REQUEST,
-        description: 'Pool không tồn tại'
+        description: 'Pool not found'
     })
     @ApiResponse({
         status: HttpStatus.UNAUTHORIZED,
-        description: 'Không có quyền truy cập'
+        description: 'Unauthorized access'
     })
     @ApiResponse({
         status: HttpStatus.INTERNAL_SERVER_ERROR,
-        description: 'Lỗi server'
+        description: 'Server error'
     })
     async getPoolDetail(
         @Param('idOrSlug') idOrSlug: string,
@@ -164,7 +164,7 @@ export class AirdropsController {
         const walletId = req.user.wallet_id;
         
         if (!walletId) {
-            throw new Error('Không tìm thấy wallet_id trong token');
+            throw new Error('Wallet ID not found in token');
         }
 
         const poolDetail = await this.airdropsService.getPoolDetailByIdOrSlug(
@@ -175,7 +175,7 @@ export class AirdropsController {
 
         return {
             success: true,
-            message: 'Lấy thông tin pool thành công',
+            message: 'Get pool details successfully',
             data: poolDetail
         };
     }

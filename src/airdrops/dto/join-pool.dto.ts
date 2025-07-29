@@ -3,7 +3,7 @@ import { IsNumber, IsNotEmpty, Min } from 'class-validator';
 
 export class StakePoolDto {
     @ApiProperty({
-        description: 'ID của pool muốn stake',
+        description: 'ID of the pool to stake',
         example: 1
     })
     @IsNumber()
@@ -11,7 +11,7 @@ export class StakePoolDto {
     poolId: number;
 
     @ApiProperty({
-        description: 'Số lượng token stake vào pool',
+        description: 'Amount of tokens to stake in the pool',
         example: 500000,
         minimum: 1
     })

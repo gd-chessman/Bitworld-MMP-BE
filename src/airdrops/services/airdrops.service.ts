@@ -603,7 +603,8 @@ export class AirdropsService {
                     creationDate: pool.apl_creation_date,
                     endDate: pool.apl_end_date,
                     status: pool.apl_status,
-                    creatorAddress: creatorWallet?.wallet_solana_address || ''
+                    creatorAddress: creatorWallet?.wallet_solana_address || '',
+                    creatorBittworldUid: creatorWallet?.bittworld_uid || null
                 };
 
                 // 7. Thêm thông tin stake của user nếu có
@@ -717,7 +718,8 @@ export class AirdropsService {
                 endDate: pool.apl_end_date,
                 status: pool.apl_status,
                 transactionHash: pool.apl_hash,
-                creatorAddress: creatorWallet?.wallet_solana_address || ''
+                creatorAddress: creatorWallet?.wallet_solana_address || '',
+                creatorBittworldUid: creatorWallet?.bittworld_uid || null
             };
 
             // 7. Thêm thông tin stake của user nếu có
@@ -774,6 +776,7 @@ export class AirdropsService {
             const memberMap = new Map<number, {
                 memberId: number;
                 solanaAddress: string;
+                bittworldUid: string | null;
                 nickname: string;
                 isCreator: boolean;
                 joinDate: Date;
@@ -787,6 +790,7 @@ export class AirdropsService {
                 memberMap.set(pool.alp_originator, {
                     memberId: pool.alp_originator,
                     solanaAddress: pool.originator.wallet_solana_address,
+                    bittworldUid: pool.originator.bittworld_uid || null,
                     nickname: pool.originator.wallet_nick_name || 'Unknown',
                     isCreator: true,
                     joinDate: pool.apl_creation_date,
@@ -814,6 +818,7 @@ export class AirdropsService {
                     memberMap.set(memberId, {
                         memberId: memberId,
                         solanaAddress: stake.member?.wallet_solana_address || 'Unknown',
+                        bittworldUid: stake.member?.bittworld_uid || null,
                         nickname: stake.member?.wallet_nick_name || 'Unknown',
                         isCreator: false,
                         joinDate: stake.apj_stake_date,

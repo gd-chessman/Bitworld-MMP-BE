@@ -23,7 +23,7 @@ export enum PoolFilterType {
 
 export class GetPoolsDto {
     @ApiProperty({
-        description: 'Bộ lọc loại pool',
+        description: 'Pool filter type',
         enum: PoolFilterType,
         required: false,
         example: PoolFilterType.ALL,
@@ -35,7 +35,7 @@ export class GetPoolsDto {
     filterType?: PoolFilterType;
 
     @ApiProperty({
-        description: 'Trường để sắp xếp danh sách pools',
+        description: 'Field to sort pools list',
         enum: PoolSortField,
         required: false,
         example: PoolSortField.CREATION_DATE
@@ -45,7 +45,7 @@ export class GetPoolsDto {
     sortBy?: PoolSortField;
 
     @ApiProperty({
-        description: 'Thứ tự sắp xếp',
+        description: 'Sort order',
         enum: PoolSortOrder,
         required: false,
         example: PoolSortOrder.DESC

@@ -3,7 +3,7 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export class CreatePoolDto {
     @ApiProperty({
-        description: 'Tên của airdrop pool',
+        description: 'Name of the airdrop pool',
         example: 'My Airdrop Pool'
     })
     @IsString()
@@ -11,17 +11,17 @@ export class CreatePoolDto {
     name: string;
 
     @ApiProperty({
-        description: 'Logo URL của pool (hỗ trợ URL hoặc file upload)',
+        description: 'Logo URL of the pool (supports URL or file upload)',
         example: 'https://example.com/logo.png',
         required: false
     })
     @IsOptional()
     @IsString()
-    @IsUrl({}, { message: 'Logo phải là URL hợp lệ' })
+    @IsUrl({}, { message: 'Logo must be a valid URL' })
     logo?: string;
 
     @ApiProperty({
-        description: 'Mô tả chi tiết về pool',
+        description: 'Detailed description of the pool',
         example: 'This is a description of the airdrop pool'
     })
     @IsString()
@@ -29,11 +29,11 @@ export class CreatePoolDto {
     describe?: string;
 
     @ApiProperty({
-        description: 'Số lượng token X để khởi tạo pool (tối thiểu 1,000,000)',
+        description: 'Amount of token X to initialize pool (minimum 1,000,000)',
         example: 1000000,
         minimum: 1000000
     })
     @IsNumber()
-    @Min(1000000, { message: 'Số lượng khởi tạo phải tối thiểu là 1,000,000' })
+    @Min(1000000, { message: 'Initial amount must be at least 1,000,000' })
     initialAmount: number;
 } 
