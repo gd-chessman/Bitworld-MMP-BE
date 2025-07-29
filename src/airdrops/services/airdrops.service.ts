@@ -10,6 +10,8 @@ import { StakePoolDto } from '../dto/join-pool.dto';
 import { PoolInfoDto } from '../dto/get-pools-response.dto';
 import { PoolDetailDto, MemberInfoDto } from '../dto/get-pool-detail-response.dto';
 import { GetPoolDetailDto, SortField, SortOrder } from '../dto/get-pool-detail.dto';
+import { PoolDetailTransactionsDto, TransactionInfoDto } from '../dto/get-pool-detail-transactions-response.dto';
+import { GetPoolDetailTransactionsDto, TransactionSortField, TransactionSortOrder } from '../dto/get-pool-detail-transactions.dto';
 import { GetPoolsDto, PoolSortField, PoolSortOrder, PoolFilterType } from '../dto/get-pools.dto';
 import { SolanaService } from '../../solana/solana.service';
 import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
@@ -23,7 +25,7 @@ import { CloudinaryService } from '../../common/cloudinary/cloudinary.service';
 export class AirdropsService {
     private readonly logger = new Logger(AirdropsService.name);
     private readonly MAX_RETRY_ATTEMPTS = 3;
-    private readonly LOCK_TTL = 300; // 5 phút
+    private readonly LOCK_TTL = 300; // 5 minutes
 
     constructor(
         @InjectRepository(AirdropListPool)
@@ -41,17 +43,17 @@ export class AirdropsService {
     ) {}
 
     async createPool(walletId: number, createPoolDto: CreatePoolDto, logoFile?: Express.Multer.File) {
-        // Tạo lock key để tránh trùng lặp API call
+        // Create lock key to prevent duplicate API calls
         const lockKey = `create_pool_${walletId}`;
         
-        // Sử dụng withLock để tự động handle lock/release
+        // Use withLock to automatically handle lock/release
         return await this.redisLockService.withLock(lockKey, async () => {
-            // 1. Kiểm tra số lượng khởi tạo tối thiểu
+            // 1. Check minimum initial amount
             if (createPoolDto.initialAmount < 1000000) {
-                throw new BadRequestException('Số lượng khởi tạo phải tối thiểu là 1,000,000');
+                throw new BadRequestException('Initial amount must be at least 1,000,000');
             }
 
-            // 2. Kiểm tra xem có pool đang pending nào của wallet này không
+            // 2. Check if there's any pending pool for this wallet
             const existingPendingPool = await this.airdropListPoolRepository.findOne({
                 where: {
                     alp_originator: walletId,
@@ -60,22 +62,22 @@ export class AirdropsService {
             });
 
             if (existingPendingPool) {
-                throw new BadRequestException('Bạn đã có một pool đang trong quá trình tạo. Vui lòng chờ hoàn tất.');
+                throw new BadRequestException('You already have a pool in creation process. Please wait for completion.');
             }
 
-            // 3. Lấy thông tin wallet
+            // 3. Get wallet information
             const wallet = await this.listWalletRepository.findOne({
                 where: { wallet_id: walletId }
             });
 
             if (!wallet) {
-                throw new BadRequestException('Wallet không tồn tại');
+                throw new BadRequestException('Wallet does not exist');
             }
 
-            // 4. Kiểm tra số dư token X
+            // 4. Check token X balance
             const mintTokenAirdrop = this.configService.get<string>('MINT_TOKEN_AIRDROP');
             if (!mintTokenAirdrop) {
-                throw new HttpException('Cấu hình MINT_TOKEN_AIRDROP không tồn tại', HttpStatus.INTERNAL_SERVER_ERROR);
+                throw new HttpException('MINT_TOKEN_AIRDROP configuration does not exist', HttpStatus.INTERNAL_SERVER_ERROR);
             }
 
             const tokenBalance = await this.solanaService.getTokenBalance(
@@ -84,65 +86,65 @@ export class AirdropsService {
             );
 
             if (tokenBalance < createPoolDto.initialAmount) {
-                throw new BadRequestException(`Số dư token X không đủ. Hiện tại: ${tokenBalance}, Yêu cầu: ${createPoolDto.initialAmount}`);
+                throw new BadRequestException(`Insufficient token X balance. Current: ${tokenBalance}, Required: ${createPoolDto.initialAmount}`);
             }
 
-            // 5. Kiểm tra số dư SOL và chuyển phí nếu cần
+            // 5. Check SOL balance and transfer fee if needed
             let solBalance = await this.solanaService.getBalance(wallet.wallet_solana_address);
             const requiredSolFee = 0.00002; // 0.00002 SOL
 
             if (solBalance < requiredSolFee) {
-                this.logger.log(`Số dư SOL không đủ (${solBalance} SOL), cần chuyển ${requiredSolFee} SOL cho wallet ${wallet.wallet_solana_address}`);
+                this.logger.log(`Insufficient SOL balance (${solBalance} SOL), need to transfer ${requiredSolFee} SOL to wallet ${wallet.wallet_solana_address}`);
                 
                 const supportFeePrivateKey = this.configService.get<string>('WALLET_SUP_FREE_PRIVATE_KEY');
                 if (!supportFeePrivateKey) {
-                    throw new HttpException('Cấu hình WALLET_SUP_FREE_PRIVATE_KEY không tồn tại', HttpStatus.INTERNAL_SERVER_ERROR);
+                    throw new HttpException('WALLET_SUP_FREE_PRIVATE_KEY configuration does not exist', HttpStatus.INTERNAL_SERVER_ERROR);
                 }
 
                 try {
                     const solTransferSignature = await this.transferSolForFee(supportFeePrivateKey, wallet.wallet_solana_address, requiredSolFee);
-                    this.logger.log(`Đã chuyển ${requiredSolFee} SOL thành công cho wallet ${wallet.wallet_solana_address}, signature: ${solTransferSignature}`);
+                    this.logger.log(`Successfully transferred ${requiredSolFee} SOL to wallet ${wallet.wallet_solana_address}, signature: ${solTransferSignature}`);
                     
-                    // Chờ transaction được confirm thực sự
+                    // Wait for transaction to be confirmed
                     await this.waitForTransactionConfirmation(solTransferSignature);
-                    this.logger.log(`Transaction SOL phí đã được confirm: ${solTransferSignature}`);
+                    this.logger.log(`SOL fee transaction confirmed: ${solTransferSignature}`);
                     
-                    // Kiểm tra lại số dư SOL sau khi chuyển
-                    await new Promise(resolve => setTimeout(resolve, 1000)); // Chờ 1s để balance update
+                    // Check SOL balance again after transfer
+                    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s for balance update
                     solBalance = await this.solanaService.getBalance(wallet.wallet_solana_address);
                     
                     if (solBalance < requiredSolFee) {
-                        throw new Error(`Số dư SOL vẫn không đủ sau khi chuyển phí. Hiện tại: ${solBalance} SOL`);
+                        throw new Error(`SOL balance still insufficient after fee transfer. Current: ${solBalance} SOL`);
                     }
                     
                 } catch (error) {
-                    this.logger.error(`Lỗi chuyển SOL phí: ${error.message}`);
-                    throw new BadRequestException('Không thể chuyển phí SOL. Vui lòng thử lại sau.');
+                    this.logger.error(`Error transferring SOL fee: ${error.message}`);
+                    throw new BadRequestException('Cannot transfer SOL fee. Please try again later.');
                 }
             }
 
-            // 6. Xử lý logo
+            // 6. Process logo
             let logoUrl = createPoolDto.logo || '';
             
             if (logoFile) {
                 try {
-                    // Upload file lên Cloudinary sử dụng CloudinaryService
+                    // Upload file to Cloudinary using CloudinaryService
                     logoUrl = await this.cloudinaryService.uploadAirdropLogo(logoFile);
                     this.logger.log(`Logo uploaded successfully: ${logoUrl}`);
                 } catch (error) {
                     this.logger.error(`Error uploading logo: ${error.message}`);
-                    throw new BadRequestException('Không thể upload logo. Vui lòng thử lại.');
+                    throw new BadRequestException('Cannot upload logo. Please try again.');
                 }
             }
 
-            // 7. Tạo pool với trạng thái pending (tạm thời không có slug)
+            // 7. Create pool with pending status (temporarily without slug)
             const currentDate = new Date();
-            const endDate = new Date(currentDate.getTime() + (365 * 24 * 60 * 60 * 1000)); // +365 ngày
+            const endDate = new Date(currentDate.getTime() + (365 * 24 * 60 * 60 * 1000)); // +365 days
             
             const newPool = this.airdropListPoolRepository.create({
                 alp_originator: walletId,
                 alp_name: createPoolDto.name,
-                alp_slug: '', // Sẽ cập nhật sau khi có ID
+                alp_slug: '', // Will be updated after getting ID
                 alp_describe: createPoolDto.describe || '',
                 alp_logo: logoUrl,
                 alp_member_num: 0,
@@ -154,40 +156,40 @@ export class AirdropsService {
 
             const savedPool = await this.airdropListPoolRepository.save(newPool);
 
-            // 7. Tạo slug với ID và cập nhật
+            // 8. Create slug with ID and update
             const slug = this.generateSlug(createPoolDto.name, savedPool.alp_id);
             await this.airdropListPoolRepository.update(
                 { alp_id: savedPool.alp_id },
                 { alp_slug: slug }
             );
 
-            // 8. Thực hiện giao dịch chuyển token
+            // 9. Execute token transfer transaction
             const walletBittAddress = this.configService.get<string>('WALLET_BITT');
             if (!walletBittAddress) {
-                throw new HttpException('Cấu hình WALLET_BITT không tồn tại', HttpStatus.INTERNAL_SERVER_ERROR);
+                throw new HttpException('WALLET_BITT configuration does not exist', HttpStatus.INTERNAL_SERVER_ERROR);
             }
 
             let transactionHash: string | null = null;
             let success = false;
 
-            // Thử giao dịch tối đa 3 lần
+            // Try transaction up to 3 times
             for (let attempt = 1; attempt <= this.MAX_RETRY_ATTEMPTS; attempt++) {
                 try {
-                    this.logger.log(`Thực hiện giao dịch chuyển token lần ${attempt} cho pool ${savedPool.alp_id}`);
+                    this.logger.log(`Executing token transfer transaction attempt ${attempt} for pool ${savedPool.alp_id}`);
                     
-                    // Kiểm tra xem có transaction nào đã được gửi cho pool này chưa
+                    // Check if any transaction has already been sent for this pool
                     const existingPool = await this.airdropListPoolRepository.findOne({
                         where: { alp_id: savedPool.alp_id }
                     });
                     
                     if (existingPool && existingPool.apl_hash) {
-                        this.logger.log(`Pool ${savedPool.alp_id} đã có transaction hash: ${existingPool.apl_hash}`);
+                        this.logger.log(`Pool ${savedPool.alp_id} already has transaction hash: ${existingPool.apl_hash}`);
                         transactionHash = existingPool.apl_hash;
                         success = true;
                         break;
                     }
                     
-                    // Tạo unique transaction ID để tránh trùng lặp
+                    // Create unique transaction ID to avoid duplication
                     const transactionId = `pool_${savedPool.alp_id}_${Date.now()}_${Math.random()}`;
                     
                     transactionHash = await this.transferTokenToBittWallet(
@@ -198,27 +200,27 @@ export class AirdropsService {
                         transactionId
                     );
 
-                    // Chờ transaction được confirm
+                    // Wait for transaction to be confirmed
                     await this.waitForTransactionConfirmation(transactionHash);
-                    this.logger.log(`Giao dịch BITT đã được confirm: ${transactionHash}`);
+                    this.logger.log(`BITT transaction confirmed: ${transactionHash}`);
 
                     success = true;
                     break;
 
                 } catch (error) {
-                    this.logger.error(`Lần thử ${attempt} thất bại: ${error.message}`);
+                    this.logger.error(`Attempt ${attempt} failed: ${error.message}`);
                     
                     if (attempt === this.MAX_RETRY_ATTEMPTS) {
-                        this.logger.error(`Đã thử tối đa ${this.MAX_RETRY_ATTEMPTS} lần nhưng vẫn thất bại`);
+                        this.logger.error(`Tried maximum ${this.MAX_RETRY_ATTEMPTS} times but still failed`);
                         break;
                     }
                     
-                    // Chờ 3 giây trước khi thử lại
+                    // Wait 3 seconds before retrying
                     await new Promise(resolve => setTimeout(resolve, 3000));
                 }
             }
 
-            // 9. Cập nhật trạng thái pool và transaction hash
+            // 10. Update pool status and transaction hash
             const finalStatus = success ? AirdropPoolStatus.ACTIVE : AirdropPoolStatus.ERROR;
             const updateData: any = { apl_status: finalStatus };
             
@@ -231,16 +233,16 @@ export class AirdropsService {
                 updateData
             );
 
-            // 10. Log kết quả cuối cùng
+            // 11. Log final result
             if (success) {
-                this.logger.log(`Pool ${savedPool.alp_id} đã được tạo thành công với transaction hash: ${transactionHash}`);
+                this.logger.log(`Pool ${savedPool.alp_id} created successfully with transaction hash: ${transactionHash}`);
             } else {
-                this.logger.error(`Pool ${savedPool.alp_id} tạo thất bại do giao dịch onchain không thành công`);
+                this.logger.error(`Pool ${savedPool.alp_id} creation failed due to onchain transaction failure`);
             }
 
             return {
                 success: true,
-                message: success ? 'Tạo pool thành công' : 'Tạo pool thất bại do giao dịch onchain',
+                message: success ? 'Pool created successfully' : 'Pool creation failed due to onchain transaction',
                 data: {
                     poolId: savedPool.alp_id,
                     name: savedPool.alp_name,
@@ -255,25 +257,25 @@ export class AirdropsService {
     }
 
     async stakePool(walletId: number, stakePoolDto: StakePoolDto) {
-        // Tạo lock key để tránh trùng lặp API call
+        // Create lock key to prevent duplicate API calls
         const lockKey = `stake_pool_${walletId}_${stakePoolDto.poolId}`;
         
-        // Sử dụng withLock để tự động handle lock/release
+        // Use withLock to automatically handle lock/release
         return await this.redisLockService.withLock(lockKey, async () => {
-            // 1. Kiểm tra pool có tồn tại và đang active không
+            // 1. Check if pool exists and is active
             const pool = await this.airdropListPoolRepository.findOne({
                 where: { alp_id: stakePoolDto.poolId }
             });
 
             if (!pool) {
-                throw new BadRequestException('Pool không tồn tại');
+                throw new BadRequestException('Pool does not exist');
             }
 
             if (pool.apl_status !== AirdropPoolStatus.ACTIVE) {
-                throw new BadRequestException('Pool không trong trạng thái active');
+                throw new BadRequestException('Pool is not in active status');
             }
 
-            // 2. Kiểm tra xem user đã có stake record trong pool này chưa
+            // 2. Check if user already has stake record in this pool
             const existingJoin = await this.airdropPoolJoinRepository.findOne({
                 where: {
                     apj_pool_id: stakePoolDto.poolId,
@@ -281,19 +283,19 @@ export class AirdropsService {
                 }
             });
 
-            // 3. Lấy thông tin wallet
+            // 3. Get wallet information
             const wallet = await this.listWalletRepository.findOne({
                 where: { wallet_id: walletId }
             });
 
             if (!wallet) {
-                throw new BadRequestException('Wallet không tồn tại');
+                throw new BadRequestException('Wallet does not exist');
             }
 
-            // 4. Kiểm tra số dư token X
+            // 4. Check token X balance
             const mintTokenAirdrop = this.configService.get<string>('MINT_TOKEN_AIRDROP');
             if (!mintTokenAirdrop) {
-                throw new HttpException('Cấu hình MINT_TOKEN_AIRDROP không tồn tại', HttpStatus.INTERNAL_SERVER_ERROR);
+                throw new HttpException('MINT_TOKEN_AIRDROP configuration does not exist', HttpStatus.INTERNAL_SERVER_ERROR);
             }
 
             const tokenBalance = await this.solanaService.getTokenBalance(
@@ -302,68 +304,68 @@ export class AirdropsService {
             );
 
             if (tokenBalance < stakePoolDto.stakeAmount) {
-                throw new BadRequestException(`Số dư token X không đủ. Hiện tại: ${tokenBalance}, Yêu cầu: ${stakePoolDto.stakeAmount}`);
+                throw new BadRequestException(`Insufficient token X balance. Current: ${tokenBalance}, Required: ${stakePoolDto.stakeAmount}`);
             }
 
-            // 5. Kiểm tra số dư SOL và chuyển phí nếu cần
+            // 5. Check SOL balance and transfer fee if needed
             let solBalance = await this.solanaService.getBalance(wallet.wallet_solana_address);
             const requiredSolFee = 0.00002; // 0.00002 SOL
 
             if (solBalance < requiredSolFee) {
-                this.logger.log(`Số dư SOL không đủ (${solBalance} SOL), cần chuyển ${requiredSolFee} SOL cho wallet ${wallet.wallet_solana_address}`);
+                this.logger.log(`Insufficient SOL balance (${solBalance} SOL), need to transfer ${requiredSolFee} SOL to wallet ${wallet.wallet_solana_address}`);
                 
                 const supportFeePrivateKey = this.configService.get<string>('WALLET_SUP_FREE_PRIVATE_KEY');
                 if (!supportFeePrivateKey) {
-                    throw new HttpException('Cấu hình WALLET_SUP_FREE_PRIVATE_KEY không tồn tại', HttpStatus.INTERNAL_SERVER_ERROR);
+                    throw new HttpException('WALLET_SUP_FREE_PRIVATE_KEY configuration does not exist', HttpStatus.INTERNAL_SERVER_ERROR);
                 }
 
                 let solTransferSuccess = false;
                 let solTransferSignature: string | null = null;
 
-                // Thử chuyển SOL phí tối đa 3 lần
+                // Try transferring SOL fee up to 3 times
                 for (let solAttempt = 1; solAttempt <= this.MAX_RETRY_ATTEMPTS; solAttempt++) {
                     try {
-                        this.logger.log(`Thực hiện chuyển SOL phí lần ${solAttempt} cho wallet ${wallet.wallet_solana_address}`);
+                        this.logger.log(`Executing SOL fee transfer attempt ${solAttempt} for wallet ${wallet.wallet_solana_address}`);
                         
                         solTransferSignature = await this.transferSolForFee(supportFeePrivateKey, wallet.wallet_solana_address, requiredSolFee);
-                        this.logger.log(`Đã chuyển ${requiredSolFee} SOL thành công cho wallet ${wallet.wallet_solana_address}, signature: ${solTransferSignature}`);
+                        this.logger.log(`Successfully transferred ${requiredSolFee} SOL to wallet ${wallet.wallet_solana_address}, signature: ${solTransferSignature}`);
                         
-                        // Chờ transaction được confirm thực sự
+                        // Wait for transaction to be confirmed
                         await this.waitForTransactionConfirmation(solTransferSignature);
-                        this.logger.log(`Transaction SOL phí đã được confirm: ${solTransferSignature}`);
+                        this.logger.log(`SOL fee transaction confirmed: ${solTransferSignature}`);
                         
-                        // Kiểm tra lại số dư SOL sau khi chuyển
-                        await new Promise(resolve => setTimeout(resolve, 1000)); // Chờ 1s để balance update
+                        // Check SOL balance again after transfer
+                        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s for balance update
                         solBalance = await this.solanaService.getBalance(wallet.wallet_solana_address);
                         
                         if (solBalance < requiredSolFee) {
-                            throw new Error(`Số dư SOL vẫn không đủ sau khi chuyển phí. Hiện tại: ${solBalance} SOL`);
+                            throw new Error(`SOL balance still insufficient after fee transfer. Current: ${solBalance} SOL`);
                         }
                         
                         solTransferSuccess = true;
                         break;
                         
                     } catch (error) {
-                        this.logger.error(`Lần thử chuyển SOL phí ${solAttempt} thất bại: ${error.message}`);
+                        this.logger.error(`SOL fee transfer attempt ${solAttempt} failed: ${error.message}`);
                         
                         if (solAttempt === this.MAX_RETRY_ATTEMPTS) {
-                            this.logger.error(`Đã thử tối đa ${this.MAX_RETRY_ATTEMPTS} lần chuyển SOL phí nhưng vẫn thất bại`);
+                            this.logger.error(`Tried maximum ${this.MAX_RETRY_ATTEMPTS} SOL fee transfers but still failed`);
                             break;
                         }
                         
-                        // Chờ 2 giây trước khi thử lại
+                        // Wait 2 seconds before retrying
                         await new Promise(resolve => setTimeout(resolve, 2000));
                     }
                 }
 
                 if (!solTransferSuccess) {
-                    throw new BadRequestException('Không thể chuyển phí SOL sau nhiều lần thử. Vui lòng thử lại sau.');
+                    throw new BadRequestException('Cannot transfer SOL fee after multiple attempts. Please try again later.');
                 }
             }
 
-            // 6. Tạo join record với trạng thái pending
+            // 6. Create join record with pending status
             const currentDate = new Date();
-            const stakeEndDate = new Date(currentDate.getTime() + (365 * 24 * 60 * 60 * 1000)); // +365 ngày
+            const stakeEndDate = new Date(currentDate.getTime() + (365 * 24 * 60 * 60 * 1000)); // +365 days
             
             const newJoin = this.airdropPoolJoinRepository.create({
                 apj_pool_id: stakePoolDto.poolId,
@@ -376,33 +378,33 @@ export class AirdropsService {
 
             const savedJoin = await this.airdropPoolJoinRepository.save(newJoin);
 
-            // 7. Thực hiện giao dịch chuyển token
+            // 7. Execute token transfer transaction
             const walletBittAddress = this.configService.get<string>('WALLET_BITT');
             if (!walletBittAddress) {
-                throw new HttpException('Cấu hình WALLET_BITT không tồn tại', HttpStatus.INTERNAL_SERVER_ERROR);
+                throw new HttpException('WALLET_BITT configuration does not exist', HttpStatus.INTERNAL_SERVER_ERROR);
             }
 
             let transactionHash: string | null = null;
             let success = false;
 
-            // Thử giao dịch tối đa 3 lần
+            // Try transaction up to 3 times
             for (let attempt = 1; attempt <= this.MAX_RETRY_ATTEMPTS; attempt++) {
                 try {
-                    this.logger.log(`Thực hiện giao dịch stake token lần ${attempt} cho join ${savedJoin.apj_id}`);
+                    this.logger.log(`Executing stake token transaction attempt ${attempt} for join ${savedJoin.apj_id}`);
                     
-                    // Kiểm tra xem có transaction nào đã được gửi cho join này chưa
+                    // Check if any transaction has already been sent for this join
                     const existingJoinRecord = await this.airdropPoolJoinRepository.findOne({
                         where: { apj_id: savedJoin.apj_id }
                     });
                     
                     if (existingJoinRecord && existingJoinRecord.apj_status === AirdropPoolJoinStatus.ACTIVE) {
-                        this.logger.log(`Join ${savedJoin.apj_id} đã được xử lý thành công`);
+                        this.logger.log(`Join ${savedJoin.apj_id} has already been processed successfully`);
                         transactionHash = 'already_processed';
                         success = true;
                         break;
                     }
                     
-                    // Tạo unique transaction ID để tránh trùng lặp
+                    // Create unique transaction ID to avoid duplication
                     const transactionId = `stake_${savedJoin.apj_id}_${Date.now()}_${Math.random()}`;
                     
                     transactionHash = await this.transferTokenToBittWallet(
@@ -413,27 +415,27 @@ export class AirdropsService {
                         transactionId
                     );
 
-                    // Chờ transaction được confirm
+                    // Wait for transaction to be confirmed
                     await this.waitForTransactionConfirmation(transactionHash);
-                    this.logger.log(`Giao dịch stake BITT đã được confirm: ${transactionHash}`);
+                    this.logger.log(`Stake BITT transaction confirmed: ${transactionHash}`);
 
                     success = true;
                     break;
 
                 } catch (error) {
-                    this.logger.error(`Lần thử ${attempt} thất bại: ${error.message}`);
+                    this.logger.error(`Attempt ${attempt} failed: ${error.message}`);
                     
                     if (attempt === this.MAX_RETRY_ATTEMPTS) {
-                        this.logger.error(`Đã thử tối đa ${this.MAX_RETRY_ATTEMPTS} lần nhưng vẫn thất bại`);
+                        this.logger.error(`Tried maximum ${this.MAX_RETRY_ATTEMPTS} times but still failed`);
                         break;
                     }
                     
-                    // Chờ 3 giây trước khi thử lại
+                    // Wait 3 seconds before retrying
                     await new Promise(resolve => setTimeout(resolve, 3000));
                 }
             }
 
-            // 8. Cập nhật trạng thái join và transaction hash
+            // 8. Update join status and transaction hash
             const finalStatus = success ? AirdropPoolJoinStatus.ACTIVE : AirdropPoolJoinStatus.ERROR;
             const updateData: any = { apj_status: finalStatus };
             
@@ -446,9 +448,9 @@ export class AirdropsService {
                 updateData
             );
 
-            // 9. Cập nhật số lượng member và volume của pool
+            // 9. Update pool member count and volume
             if (success) {
-                // Nếu user chưa có stake record, tăng số member
+                // If user doesn't have stake record, increase member count
                 const memberIncrement = existingJoin ? 0 : 1;
                 
                 await this.airdropListPoolRepository.update(
@@ -460,16 +462,16 @@ export class AirdropsService {
                 );
             }
 
-            // 10. Log kết quả cuối cùng
+            // 10. Log final result
             if (success) {
-                this.logger.log(`Join ${savedJoin.apj_id} đã được tạo thành công với transaction hash: ${transactionHash}`);
+                this.logger.log(`Join ${savedJoin.apj_id} created successfully with transaction hash: ${transactionHash}`);
             } else {
-                this.logger.error(`Join ${savedJoin.apj_id} tạo thất bại do giao dịch onchain không thành công`);
+                this.logger.error(`Join ${savedJoin.apj_id} creation failed due to onchain transaction failure`);
             }
 
             return {
                 success: true,
-                message: success ? 'Stake pool thành công' : 'Stake pool thất bại do giao dịch onchain',
+                message: success ? 'Stake pool successful' : 'Stake pool failed due to onchain transaction',
                 data: {
                     joinId: savedJoin.apj_id,
                     poolId: stakePoolDto.poolId,
@@ -551,7 +553,7 @@ export class AirdropsService {
                     break;
 
                 default:
-                    // Fallback về ALL nếu filterType không hợp lệ
+                    // Fallback to ALL if filterType is invalid
                     this.logger.warn(`Invalid filterType: ${filterType}, falling back to ALL`);
                     pools = await this.airdropListPoolRepository.find({
                         where: { apl_status: AirdropPoolStatus.ACTIVE },
@@ -628,62 +630,62 @@ export class AirdropsService {
             return poolsWithUserInfo;
 
         } catch (error) {
-            this.logger.error(`Lỗi lấy danh sách pool: ${error.message}`);
+            this.logger.error(`Error getting pools list: ${error.message}`);
             throw error;
         }
     }
 
     async getPoolDetailByIdOrSlug(idOrSlug: string, walletId: number, query: GetPoolDetailDto): Promise<PoolDetailDto> {
         try {
-            // Kiểm tra xem idOrSlug có phải là số không
+            // Check if idOrSlug is numeric
             const isNumeric = !isNaN(Number(idOrSlug));
             
             let pool;
             if (isNumeric) {
-                // Tìm theo ID
+                // Find by ID
                 pool = await this.airdropListPoolRepository.findOne({
                     where: { alp_id: parseInt(idOrSlug) }
                 });
             } else {
-                // Tìm theo slug
+                // Find by slug
                 pool = await this.airdropListPoolRepository.findOne({
                     where: { alp_slug: idOrSlug }
                 });
             }
 
             if (!pool) {
-                throw new Error('Pool không tồn tại');
+                throw new Error('Pool does not exist');
             }
 
-            // Gọi method getPoolDetail với poolId đã tìm được
+            // Call getPoolDetail method with found poolId
             return await this.getPoolDetail(pool.alp_id, walletId, query);
 
         } catch (error) {
-            this.logger.error(`Lỗi lấy thông tin pool detail by id or slug: ${error.message}`);
+            this.logger.error(`Error getting pool detail by id or slug: ${error.message}`);
             throw error;
         }
     }
 
     async getPoolDetail(poolId: number, walletId: number, query: GetPoolDetailDto): Promise<PoolDetailDto> {
         try {
-            // 1. Lấy thông tin pool
+            // 1. Get pool information
             const pool = await this.airdropListPoolRepository.findOne({
                 where: { alp_id: poolId }
             });
 
             if (!pool) {
-                throw new Error('Pool không tồn tại');
+                throw new Error('Pool does not exist');
             }
 
-            // 2. Lấy thông tin ví khởi tạo pool
+            // 2. Get pool creator wallet information
             const creatorWallet = await this.listWalletRepository.findOne({
                 where: { wallet_id: pool.alp_originator }
             });
 
-            // 3. Kiểm tra xem user có phải là creator của pool không
+            // 3. Check if user is the creator of the pool
             const isCreator = pool.alp_originator === walletId;
 
-            // 3. Lấy thông tin stake của user trong pool này
+            // 4. Get user stake information in this pool
             const userStakes = await this.airdropPoolJoinRepository.find({
                 where: {
                     apj_pool_id: poolId,
@@ -692,7 +694,7 @@ export class AirdropsService {
                 }
             });
 
-            // 4. Tính tổng volume user đã stake và số lần stake
+            // 5. Calculate total volume user has staked and stake count
             let totalUserStaked = 0;
             let userStakeCount = 0;
             if (userStakes.length > 0) {
@@ -700,12 +702,12 @@ export class AirdropsService {
                 userStakeCount = userStakes.length;
             }
 
-            // 5. Nếu user là creator, cộng thêm volume ban đầu
+            // 6. If user is creator, add initial volume
             if (isCreator) {
                 totalUserStaked += Number(pool.apl_volume);
             }
 
-            // 6. Tạo thông tin pool cơ bản
+            // 7. Create basic pool information
             const poolDetail: PoolDetailDto = {
                 poolId: pool.alp_id,
                 name: pool.alp_name,
@@ -722,7 +724,7 @@ export class AirdropsService {
                 creatorBittworldUid: creatorWallet?.bittworld_uid || null
             };
 
-            // 7. Thêm thông tin stake của user nếu có
+            // 8. Add user stake information if exists
             if (userStakes.length > 0 || isCreator) {
                 const firstStakeDate = userStakes.length > 0 
                     ? userStakes[0].apj_stake_date 
@@ -737,7 +739,7 @@ export class AirdropsService {
                 };
             }
 
-            // 8. Nếu user là creator, lấy danh sách tất cả members
+            // 9. If user is creator, get all members list
             if (isCreator) {
                 const members = await this.getPoolMembers(poolId, query);
                 poolDetail.members = members;
@@ -746,14 +748,14 @@ export class AirdropsService {
             return poolDetail;
 
         } catch (error) {
-            this.logger.error(`Lỗi lấy thông tin pool detail: ${error.message}`);
+            this.logger.error(`Error getting pool detail: ${error.message}`);
             throw error;
         }
     }
 
     private async getPoolMembers(poolId: number, query: GetPoolDetailDto): Promise<MemberInfoDto[]> {
         try {
-            // 1. Lấy tất cả stake records của pool
+            // 1. Get all stake records of the pool
             const allStakes = await this.airdropPoolJoinRepository.find({
                 where: {
                     apj_pool_id: poolId,
@@ -762,17 +764,17 @@ export class AirdropsService {
                 relations: ['member']
             });
 
-            // 2. Lấy thông tin creator
+            // 2. Get creator information
             const pool = await this.airdropListPoolRepository.findOne({
                 where: { alp_id: poolId },
                 relations: ['originator']
             });
 
             if (!pool) {
-                throw new Error('Pool không tồn tại');
+                throw new Error('Pool does not exist');
             }
 
-            // 3. Tạo map để group theo member
+            // 3. Create map to group by member
             const memberMap = new Map<number, {
                 memberId: number;
                 solanaAddress: string;
@@ -785,7 +787,7 @@ export class AirdropsService {
                 status: string;
             }>();
 
-            // 4. Thêm creator vào map
+            // 4. Add creator to map
             if (pool.originator) {
                 memberMap.set(pool.alp_originator, {
                     memberId: pool.alp_originator,
@@ -794,27 +796,27 @@ export class AirdropsService {
                     nickname: pool.originator.wallet_nick_name || 'Unknown',
                     isCreator: true,
                     joinDate: pool.apl_creation_date,
-                    totalStaked: Number(pool.apl_volume), // Volume ban đầu
-                    stakeCount: 0, // Sẽ được cập nhật sau
+                    totalStaked: Number(pool.apl_volume), // Initial volume
+                    stakeCount: 0, // Will be updated later
                     status: 'active'
                 });
             }
 
-            // 5. Xử lý các stake records
+            // 5. Process stake records
             for (const stake of allStakes) {
                 const memberId = stake.apj_member;
                 const existingMember = memberMap.get(memberId);
 
                 if (existingMember) {
-                    // Cập nhật thông tin member hiện có
+                    // Update existing member information
                     existingMember.totalStaked += Number(stake.apj_volume);
                     existingMember.stakeCount += 1;
-                    // Cập nhật join date nếu stake này sớm hơn
+                    // Update join date if this stake is earlier
                     if (stake.apj_stake_date < existingMember.joinDate) {
                         existingMember.joinDate = stake.apj_stake_date;
                     }
                 } else {
-                    // Tạo member mới
+                    // Create new member
                     memberMap.set(memberId, {
                         memberId: memberId,
                         solanaAddress: stake.member?.wallet_solana_address || 'Unknown',
@@ -829,20 +831,20 @@ export class AirdropsService {
                 }
             }
 
-            // 6. Chuyển map thành array
+            // 6. Convert map to array
             let members = Array.from(memberMap.values());
 
-            // 7. Sắp xếp theo yêu cầu
+            // 7. Sort according to requirements
             const sortBy = query.sortBy || SortField.TOTAL_STAKED;
             const sortOrder = query.sortOrder || SortOrder.DESC;
 
-            // Creator luôn ở đầu
+            // Creator always at the top
             members.sort((a, b) => {
-                // Creator luôn ở đầu
+                // Creator always at the top
                 if (a.isCreator && !b.isCreator) return -1;
                 if (!a.isCreator && b.isCreator) return 1;
 
-                // Sắp xếp theo trường được chọn
+                // Sort by selected field
                 let comparison = 0;
                 switch (sortBy) {
                     case SortField.JOIN_DATE:
@@ -867,7 +869,7 @@ export class AirdropsService {
             return members;
 
         } catch (error) {
-            this.logger.error(`Lỗi lấy danh sách members: ${error.message}`);
+            this.logger.error(`Error getting members list: ${error.message}`);
             throw error;
         }
     }
@@ -883,7 +885,7 @@ export class AirdropsService {
             // Decode private key
             const keypair = this.getKeypairFromPrivateKey(privateKey);
             
-            // Tạo unique transaction để tránh trùng lặp
+            // Create unique transaction to avoid duplication
             const uniqueId = transactionId || `${Date.now()}_${Math.random()}`;
             
             // Get token accounts
@@ -917,11 +919,11 @@ export class AirdropsService {
             transaction.sign(keypair);
             const signature = await this.connection.sendTransaction(transaction, [keypair]);
             
-            this.logger.log(`Đã gửi transaction BITT với signature: ${signature}, transactionId: ${uniqueId}`);
+            this.logger.log(`BITT transaction sent with signature: ${signature}, transactionId: ${uniqueId}`);
             return signature;
 
         } catch (error) {
-            this.logger.error(`Lỗi chuyển token: ${error.message}`);
+            this.logger.error(`Error transferring token: ${error.message}`);
             throw error;
         }
     }
@@ -940,7 +942,7 @@ export class AirdropsService {
             // Decode private key
             const keypair = this.getKeypairFromPrivateKey(fromPrivateKey);
             
-            // Tạo unique transaction để tránh trùng lặp
+            // Create unique transaction to avoid duplication
             const uniqueId = Date.now() + Math.random();
             
             // Create transfer instruction
@@ -961,11 +963,11 @@ export class AirdropsService {
             transaction.sign(keypair);
             const signature = await this.connection.sendTransaction(transaction, [keypair]);
             
-            this.logger.log(`Đã gửi transaction SOL phí với signature: ${signature}, uniqueId: ${uniqueId}`);
+            this.logger.log(`SOL fee transaction sent with signature: ${signature}, uniqueId: ${uniqueId}`);
             return signature;
 
         } catch (error) {
-            this.logger.error(`Lỗi chuyển SOL phí: ${error.message}`);
+            this.logger.error(`Error transferring SOL fee: ${error.message}`);
             throw error;
         }
     }
@@ -1031,6 +1033,226 @@ export class AirdropsService {
                 return 'apl_end_date';
             default:
                 return 'apl_creation_date';
+        }
+    }
+
+    async getPoolDetailTransactionsByIdOrSlug(idOrSlug: string, walletId: number, query: GetPoolDetailTransactionsDto): Promise<PoolDetailTransactionsDto> {
+        try {
+            // Check if idOrSlug is numeric
+            const isNumeric = !isNaN(Number(idOrSlug));
+            
+            let pool;
+            if (isNumeric) {
+                // Find by ID
+                pool = await this.airdropListPoolRepository.findOne({
+                    where: { alp_id: parseInt(idOrSlug) }
+                });
+            } else {
+                // Find by slug
+                pool = await this.airdropListPoolRepository.findOne({
+                    where: { alp_slug: idOrSlug }
+                });
+            }
+
+            if (!pool) {
+                throw new Error('Pool does not exist');
+            }
+
+            // Call getPoolDetailTransactions method with found poolId
+            return await this.getPoolDetailTransactions(pool.alp_id, walletId, query);
+
+        } catch (error) {
+            this.logger.error(`Error getting pool detail transactions by id or slug: ${error.message}`);
+            throw error;
+        }
+    }
+
+    async getPoolDetailTransactions(poolId: number, walletId: number, query: GetPoolDetailTransactionsDto): Promise<PoolDetailTransactionsDto> {
+        try {
+            // 1. Get pool information
+            const pool = await this.airdropListPoolRepository.findOne({
+                where: { alp_id: poolId }
+            });
+
+            if (!pool) {
+                throw new Error('Pool does not exist');
+            }
+
+            // 2. Get pool creator wallet information
+            const creatorWallet = await this.listWalletRepository.findOne({
+                where: { wallet_id: pool.alp_originator }
+            });
+
+            // 3. Check if user is the creator of the pool
+            const isCreator = pool.alp_originator === walletId;
+
+            // 4. Get user stake information in this pool
+            const userStakes = await this.airdropPoolJoinRepository.find({
+                where: {
+                    apj_pool_id: poolId,
+                    apj_member: walletId,
+                    apj_status: AirdropPoolJoinStatus.ACTIVE
+                }
+            });
+
+            // 5. Calculate total volume user has staked and stake count
+            let totalUserStaked = 0;
+            let userStakeCount = 0;
+            if (userStakes.length > 0) {
+                totalUserStaked = userStakes.reduce((sum, stake) => sum + Number(stake.apj_volume), 0);
+                userStakeCount = userStakes.length;
+            }
+
+            // 6. If user is creator, add initial volume
+            if (isCreator) {
+                totalUserStaked += Number(pool.apl_volume);
+            }
+
+            // 7. Create basic pool information
+            const poolDetail: PoolDetailTransactionsDto = {
+                poolId: pool.alp_id,
+                name: pool.alp_name,
+                slug: pool.alp_slug,
+                logo: pool.alp_logo || '',
+                describe: pool.alp_describe || '',
+                memberCount: pool.alp_member_num,
+                totalVolume: Number(pool.apl_volume),
+                creationDate: pool.apl_creation_date,
+                endDate: pool.apl_end_date,
+                status: pool.apl_status,
+                transactionHash: pool.apl_hash,
+                creatorAddress: creatorWallet?.wallet_solana_address || '',
+                creatorBittworldUid: creatorWallet?.bittworld_uid || null,
+                transactions: []
+            };
+
+            // 8. Add user stake information if exists
+            if (userStakes.length > 0 || isCreator) {
+                const firstStakeDate = userStakes.length > 0 
+                    ? userStakes[0].apj_stake_date 
+                    : pool.apl_creation_date;
+
+                poolDetail.userStakeInfo = {
+                    isCreator: isCreator,
+                    joinStatus: userStakes.length > 0 ? 'active' : 'creator',
+                    joinDate: firstStakeDate,
+                    totalStaked: totalUserStaked,
+                    stakeCount: userStakeCount
+                };
+            }
+
+            // 9. Get all transactions in the pool
+            const transactions = await this.getPoolTransactions(poolId, query);
+            poolDetail.transactions = transactions;
+
+            return poolDetail;
+
+        } catch (error) {
+            this.logger.error(`Error getting pool detail transactions: ${error.message}`);
+            throw error;
+        }
+    }
+
+    private async getPoolTransactions(poolId: number, query: GetPoolDetailTransactionsDto): Promise<TransactionInfoDto[]> {
+        try {
+            // 1. Get all stake records of the pool with member information
+            const allStakes = await this.airdropPoolJoinRepository.find({
+                where: {
+                    apj_pool_id: poolId,
+                    apj_status: AirdropPoolJoinStatus.ACTIVE
+                },
+                relations: ['member']
+            });
+
+            // 2. Get creator information
+            const pool = await this.airdropListPoolRepository.findOne({
+                where: { alp_id: poolId },
+                relations: ['originator']
+            });
+
+            if (!pool) {
+                throw new Error('Pool does not exist');
+            }
+
+            // 3. Create transactions list
+            const transactions: TransactionInfoDto[] = [];
+
+            // 4. Add creator's initial transaction (if pool is active)
+            if (pool.apl_status === AirdropPoolStatus.ACTIVE && pool.originator) {
+                transactions.push({
+                    transactionId: 0, // Special ID for creator's initial transaction
+                    memberId: pool.alp_originator,
+                    solanaAddress: pool.originator.wallet_solana_address,
+                    bittworldUid: pool.originator.bittworld_uid || null,
+                    nickname: pool.originator.wallet_nick_name || 'Creator',
+                    isCreator: true,
+                    stakeAmount: Number(pool.apl_volume),
+                    transactionDate: pool.apl_creation_date,
+                    status: pool.apl_status,
+                    transactionHash: pool.apl_hash
+                });
+            }
+
+            // 5. Add all member transactions
+            for (const stake of allStakes) {
+                if (stake.member) {
+                    transactions.push({
+                        transactionId: stake.apj_id,
+                        memberId: stake.apj_member,
+                        solanaAddress: stake.member.wallet_solana_address,
+                        bittworldUid: stake.member.bittworld_uid || null,
+                        nickname: stake.member.wallet_nick_name || 'Unknown',
+                        isCreator: false,
+                        stakeAmount: Number(stake.apj_volume),
+                        transactionDate: stake.apj_stake_date,
+                        status: stake.apj_status,
+                        transactionHash: stake.apj_hash
+                    });
+                }
+            }
+
+            // 6. Sort transactions based on query parameters
+            const sortBy = query.sortBy || TransactionSortField.TRANSACTION_DATE;
+            const sortOrder = query.sortOrder || TransactionSortOrder.DESC;
+
+            transactions.sort((a, b) => {
+                let aValue: any;
+                let bValue: any;
+
+                switch (sortBy) {
+                    case TransactionSortField.TRANSACTION_DATE:
+                        aValue = new Date(a.transactionDate).getTime();
+                        bValue = new Date(b.transactionDate).getTime();
+                        break;
+                    case TransactionSortField.STAKE_AMOUNT:
+                        aValue = a.stakeAmount;
+                        bValue = b.stakeAmount;
+                        break;
+                    case TransactionSortField.MEMBER_ID:
+                        aValue = a.memberId;
+                        bValue = b.memberId;
+                        break;
+                    case TransactionSortField.STATUS:
+                        aValue = a.status;
+                        bValue = b.status;
+                        break;
+                    default:
+                        aValue = new Date(a.transactionDate).getTime();
+                        bValue = new Date(b.transactionDate).getTime();
+                }
+
+                if (sortOrder === TransactionSortOrder.ASC) {
+                    return aValue > bValue ? 1 : -1;
+                } else {
+                    return aValue < bValue ? 1 : -1;
+                }
+            });
+
+            return transactions;
+
+        } catch (error) {
+            this.logger.error(`Error getting pool transactions: ${error.message}`);
+            throw error;
         }
     }
 } 

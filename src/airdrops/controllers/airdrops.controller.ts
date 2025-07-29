@@ -12,6 +12,8 @@ import { GetPoolsResponseDto } from '../dto/get-pools-response.dto';
 import { GetPoolDetailResponseDto } from '../dto/get-pool-detail-response.dto';
 import { GetPoolDetailDto } from '../dto/get-pool-detail.dto';
 import { GetPoolsDto } from '../dto/get-pools.dto';
+import { GetPoolDetailTransactionsResponseDto } from '../dto/get-pool-detail-transactions-response.dto';
+import { GetPoolDetailTransactionsDto } from '../dto/get-pool-detail-transactions.dto';
 
 @ApiTags('Airdrops')
 @Controller('airdrops')
@@ -177,6 +179,59 @@ export class AirdropsController {
             success: true,
             message: 'Get pool details successfully',
             data: poolDetail
+        };
+    }
+
+    @Get('pool-detail/:idOrSlug')
+    @UseGuards(AirdropJwtAuthGuard)
+    @ApiBearerAuth()
+    @ApiOperation({
+        summary: 'Get airdrop pool detail with all transactions',
+        description: 'Get detailed information of an airdrop pool by ID or slug with all transactions list. Returns all individual stake transactions instead of aggregated member data.'
+    })
+    @ApiParam({
+        name: 'idOrSlug',
+        description: 'ID or slug of the pool (e.g., 1 or "my-airdrop-pool-1")',
+        example: 'my-airdrop-pool-1'
+    })
+    @ApiResponse({
+        status: HttpStatus.OK,
+        description: 'Get pool detail transactions successfully',
+        type: GetPoolDetailTransactionsResponseDto
+    })
+    @ApiResponse({
+        status: HttpStatus.BAD_REQUEST,
+        description: 'Pool not found'
+    })
+    @ApiResponse({
+        status: HttpStatus.UNAUTHORIZED,
+        description: 'Unauthorized access'
+    })
+    @ApiResponse({
+        status: HttpStatus.INTERNAL_SERVER_ERROR,
+        description: 'Server error'
+    })
+    async getPoolDetailTransactions(
+        @Param('idOrSlug') idOrSlug: string,
+        @Query() query: GetPoolDetailTransactionsDto,
+        @Request() req: any
+    ): Promise<GetPoolDetailTransactionsResponseDto> {
+        const walletId = req.user.wallet_id;
+        
+        if (!walletId) {
+            throw new Error('Wallet ID not found in token');
+        }
+
+        const poolDetailTransactions = await this.airdropsService.getPoolDetailTransactionsByIdOrSlug(
+            idOrSlug,
+            walletId,
+            query
+        );
+
+        return {
+            success: true,
+            message: 'Get pool detail transactions successfully',
+            data: poolDetailTransactions
         };
     }
 } 

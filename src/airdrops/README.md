@@ -398,7 +398,13 @@ Content-Type: application/json
 
 #### GET /api/v1/airdrops/pool/:idOrSlug
 
-Lấy thông tin chi tiết của một airdrop pool theo ID hoặc slug. Nếu user là creator, sẽ hiển thị thêm danh sách members.
+Lấy thông tin chi tiết của một airdrop pool theo ID hoặc slug. Nếu user là creator, sẽ hiển thị thêm danh sách members (thống kê tổng hợp).
+
+### Get Pool Detail Transactions API
+
+#### GET /api/v1/airdrops/pool-detail/:idOrSlug
+
+Lấy thông tin chi tiết của một airdrop pool theo ID hoặc slug kèm theo danh sách tất cả các transaction (thay vì thống kê tổng hợp như API `/pool/:id`).
 
 **Headers:**
 ```
@@ -419,10 +425,22 @@ Content-Type: application/json
   - `asc`: Tăng dần
   - `desc`: Giảm dần
 
+**Query Parameters (for pool-detail):**
+- `sortBy` (optional): Trường để sắp xếp danh sách transactions
+  - `transactionDate` (default): Sắp xếp theo ngày thực hiện transaction
+  - `stakeAmount`: Sắp xếp theo số lượng token stake
+  - `memberId`: Sắp xếp theo ID của member
+  - `status`: Sắp xếp theo trạng thái transaction
+- `sortOrder` (optional): Thứ tự sắp xếp
+  - `asc`: Tăng dần
+  - `desc`: Giảm dần (default)
+
 **Ví dụ Request:**
 ```
 GET /api/v1/airdrops/pool/my-airdrop-pool-1
 GET /api/v1/airdrops/pool/1
+GET /api/v1/airdrops/pool-detail/my-airdrop-pool-1
+GET /api/v1/airdrops/pool-detail/1
 ```
 
 **Response (User thường):**
@@ -508,6 +526,86 @@ GET /api/v1/airdrops/pool/1
 }
 ```
 
+**Response (pool-detail - Transactions):**
+```json
+{
+  "success": true,
+  "message": "Get pool detail transactions successfully",
+  "data": {
+    "poolId": 1,
+    "name": "My Airdrop Pool",
+    "slug": "my-airdrop-pool-1",
+    "logo": "https://example.com/logo.png",
+    "describe": "Mô tả chi tiết về pool",
+    "memberCount": 25,
+    "totalVolume": 5000000,
+    "creationDate": "2024-01-15T10:30:00.000Z",
+    "endDate": "2025-01-15T10:30:00.000Z",
+    "status": "active",
+    "transactionHash": "5J7X...abc123",
+    "creatorAddress": "4d9d4hWrrDDgqGiQctkcPwyinZhozyj2xaPRi9MSz44v",
+    "creatorBittworldUid": "BW123456789",
+    "userStakeInfo": {
+      "isCreator": false,
+      "joinStatus": "active",
+      "joinDate": "2024-01-16T15:30:00.000Z",
+      "totalStaked": 1000000,
+      "stakeCount": 3
+    },
+    "transactions": [
+      {
+        "transactionId": 0,
+        "memberId": 123456,
+        "solanaAddress": "4d9d4hWrrDDgqGiQctkcPwyinZhozyj2xaPRi9MSz44v",
+        "bittworldUid": "BW123456789",
+        "nickname": "Creator",
+        "isCreator": true,
+        "stakeAmount": 5000000,
+        "transactionDate": "2024-01-15T10:30:00.000Z",
+        "status": "active",
+        "transactionHash": "5J7X...abc123"
+      },
+      {
+        "transactionId": 1,
+        "memberId": 789012,
+        "solanaAddress": "9K8Y...def456",
+        "bittworldUid": "BW789012345",
+        "nickname": "User123",
+        "isCreator": false,
+        "stakeAmount": 500000,
+        "transactionDate": "2024-01-16T15:30:00.000Z",
+        "status": "active",
+        "transactionHash": "9K8Y...def456"
+      },
+      {
+        "transactionId": 2,
+        "memberId": 789012,
+        "solanaAddress": "9K8Y...def456",
+        "bittworldUid": "BW789012345",
+        "nickname": "User123",
+        "isCreator": false,
+        "stakeAmount": 300000,
+        "transactionDate": "2024-01-17T10:15:00.000Z",
+        "status": "active",
+        "transactionHash": "7M9N...ghi789"
+      },
+      {
+        "transactionId": 3,
+        "memberId": 789012,
+        "solanaAddress": "9K8Y...def456",
+        "bittworldUid": "BW789012345",
+        "nickname": "User123",
+        "isCreator": false,
+        "stakeAmount": 200000,
+        "transactionDate": "2024-01-18T14:20:00.000Z",
+        "status": "active",
+        "transactionHash": "2P3Q...jkl012"
+      }
+    ]
+  }
+}
+```
+
 **Business Logic:**
 1. **Tìm pool theo ID hoặc slug:**
    - Kiểm tra xem `idOrSlug` có phải là số không
@@ -533,6 +631,23 @@ GET /api/v1/airdrops/pool/1
   - Tổng số lượng stake (totalStaked)
   - Số lần stake (stakeCount)
   - ID member (memberId)
+
+**Business Logic (pool-detail - Transactions):**
+1. **Tìm pool theo ID hoặc slug** (tương tự như trên)
+2. **Lấy thông tin pool cơ bản** (tương tự như trên)
+3. **Lấy danh sách transactions:**
+   - **Creator's initial transaction**: Transaction đầu tiên khi tạo pool (transactionId = 0)
+   - **Member transactions**: Tất cả các transaction stake từ bảng `airdrop_pool_joins`
+   - Mỗi transaction bao gồm đầy đủ thông tin: ID, member, amount, date, hash, status
+4. **Sắp xếp transactions** theo trường và thứ tự được chọn
+
+**Sắp xếp Transactions:**
+- Hỗ trợ sắp xếp theo:
+  - Ngày thực hiện transaction (transactionDate) - mặc định
+  - Số lượng token stake (stakeAmount)
+  - ID của member (memberId)
+  - Trạng thái transaction (status)
+- Hỗ trợ thứ tự tăng dần (asc) hoặc giảm dần (desc)
 
 ## Environment Variables
 
