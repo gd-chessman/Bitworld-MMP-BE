@@ -882,6 +882,9 @@ export class AirdropsService {
         transactionId?: string
     ): Promise<string> {
         try {
+            this.logger.debug(`Starting token transfer with private key format check`);
+            this.logger.debug(`Private key format (first 20 chars): ${privateKey.substring(0, 20)}...`);
+            
             // Decode private key
             const keypair = this.getKeypairFromPrivateKey(privateKey);
             
@@ -929,8 +932,37 @@ export class AirdropsService {
     }
 
     private getKeypairFromPrivateKey(privateKey: string): any {
-        const decodedKey = bs58.decode(privateKey);
-        return require('@solana/web3.js').Keypair.fromSecretKey(decodedKey);
+        try {
+            // First, try to parse as JSON (database format)
+            let solanaPrivateKey: string;
+            
+            try {
+                const privateKeyObj = JSON.parse(privateKey);
+                if (privateKeyObj.solana) {
+                    solanaPrivateKey = privateKeyObj.solana;
+                    this.logger.debug(`Successfully extracted Solana private key from JSON format`);
+                } else {
+                    throw new Error('No solana private key found in JSON');
+                }
+            } catch (jsonError) {
+                // If not JSON, assume it's already a Solana private key
+                solanaPrivateKey = privateKey;
+                this.logger.debug(`Using private key as direct Solana key (not JSON format)`);
+            }
+
+            // Validate and decode the Solana private key
+            const decodedKey = bs58.decode(solanaPrivateKey);
+            if (decodedKey.length !== 64) {
+                throw new Error(`Invalid Solana private key length: ${decodedKey.length} bytes`);
+            }
+
+            this.logger.debug(`Successfully decoded private key, length: ${decodedKey.length} bytes`);
+            return require('@solana/web3.js').Keypair.fromSecretKey(decodedKey);
+        } catch (error) {
+            this.logger.error(`Error parsing private key: ${error.message}`);
+            this.logger.error(`Private key format (first 20 chars): ${privateKey.substring(0, 20)}...`);
+            throw new Error(`Invalid private key format: ${error.message}`);
+        }
     }
 
     private async transferSolForFee(
