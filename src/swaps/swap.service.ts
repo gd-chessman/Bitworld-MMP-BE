@@ -5,8 +5,11 @@ import { ConfigService } from '@nestjs/config';
 import { Connection, PublicKey, Transaction, sendAndConfirmTransaction, Keypair, SystemProgram } from '@solana/web3.js';
 import { SwapOrder, SwapOrderType, SwapOrderStatus } from './entities/swap-order.entity';
 import { SwapSettings } from './entities/swap-setting.entity';
+import { SwapInvestors } from './entities/swap-investor.entity';
+import { SwapInvestorReward } from './entities/swap-investor-reward.entity';
 import { ListWallet } from '../telegram-wallets/entities/list-wallet.entity';
 import { CreateSwapDto } from './dto/create-swap.dto';
+import { ContributeCapitalDto, ContributionType } from './dto/contribute-capital.dto';
 import { TOKEN_PROGRAM_ID, getMint, createMintToInstruction, createTransferInstruction, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction } from '@solana/spl-token';
 
 import bs58 from 'bs58';
@@ -35,6 +38,10 @@ export class SwapService {
     private listWalletRepository: Repository<ListWallet>,
     @InjectRepository(SwapSettings)
     private swapSettingsRepository: Repository<SwapSettings>,
+    @InjectRepository(SwapInvestors)
+    private swapInvestorsRepository: Repository<SwapInvestors>,
+    @InjectRepository(SwapInvestorReward)
+    private swapInvestorRewardRepository: Repository<SwapInvestorReward>,
     private configService: ConfigService,
   ) {
     const rpcUrl = this.configService.get<string>('SOLANA_RPC_URL');
@@ -404,6 +411,11 @@ export class SwapService {
 
         this.logger.log(`Swap completed successfully: ${createSwapDto.swap_type}, Amount: ${createSwapDto.input_amount}, Output: ${outputAmount}, Fee: ${feeAmount} (${swapFeePercent}%), TX: ${txHash}`);
 
+        // Gọi hàm phân phối phần thưởng cho nhà đầu tư (chạy ngầm)
+        this.distributeInvestorRewards(feeAmount, savedOrder.swap_order_id).catch(error => {
+          this.logger.error(`Failed to distribute investor rewards: ${error.message}`);
+        });
+
         return {
           success: true,
           message: 'Swap order created successfully',
@@ -480,5 +492,207 @@ export class SwapService {
       message: 'Swap history retrieved successfully',
       data: swapHistory,
     };
+  }
+
+  async contributeCapital(contributeCapitalDto: ContributeCapitalDto, wallet_address: string): Promise<any> {
+    try {
+      // 1. Validate input
+      if (contributeCapitalDto.amount <= 0) {
+        throw new BadRequestException('Amount must be greater than 0');
+      }
+
+      // 2. Validate wallet address format (basic Solana address validation)
+      const walletAddressRegex = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+      if (!walletAddressRegex.test(wallet_address)) {
+        throw new BadRequestException('Invalid Solana wallet address format');
+      }
+
+      // 3. Lấy giá SOL hiện tại để tính USD
+      const solPriceUSD = await this.getSolPriceUSD();
+
+      // 4. Tìm nhà đầu tư
+      const investor = await this.swapInvestorsRepository.findOne({
+        where: { wallet_address: wallet_address }
+      });
+
+      if (!investor) {
+        throw new BadRequestException('Investor not found. Please contact admin to register as an investor first.');
+      }
+
+      if (!investor.active) {
+        throw new BadRequestException('Investor account is not active. Please contact admin.');
+      }
+
+      // 5. Tính toán và cập nhật số lượng token
+      let newAmountSol = Number(investor.amount_sol);
+      let newAmountUsdt = Number(investor.amount_usdt);
+      let newAmountUsd = Number(investor.amount_usd);
+
+      switch (contributeCapitalDto.contribution_type) {
+        case ContributionType.SOL:
+          newAmountSol += contributeCapitalDto.amount;
+          newAmountUsd += contributeCapitalDto.amount * solPriceUSD;
+          break;
+        
+        case ContributionType.USDT:
+          newAmountUsdt += contributeCapitalDto.amount;
+          newAmountUsd += contributeCapitalDto.amount; // 1 USDT = 1 USD
+          break;
+        
+        default:
+          throw new BadRequestException(`Unsupported contribution type: ${contributeCapitalDto.contribution_type}`);
+      }
+
+      // 6. Cập nhật thông tin nhà đầu tư
+      investor.amount_sol = newAmountSol;
+      investor.amount_usdt = newAmountUsdt;
+      investor.amount_usd = newAmountUsd;
+
+      // 7. Cập nhật coins dựa trên loại token được góp
+      let currentCoins: string[] = [];
+      if (investor.coins) {
+        if (typeof investor.coins === 'string') {
+          try {
+            const parsed = JSON.parse(investor.coins);
+            currentCoins = Array.isArray(parsed) ? parsed : [];
+          } catch (e) {
+            currentCoins = [];
+          }
+        } else if (Array.isArray(investor.coins)) {
+          currentCoins = investor.coins;
+        }
+      }
+
+      // Thêm coin hiện tại vào danh sách nếu chưa có
+      const currentCoin = contributeCapitalDto.contribution_type.toUpperCase();
+      if (!currentCoins.includes(currentCoin)) {
+        currentCoins.push(currentCoin);
+      }
+      investor.coins = currentCoins;
+
+      const savedInvestor = await this.swapInvestorsRepository.save(investor);
+
+      this.logger.log(`Capital contribution: Investor ${wallet_address} contributed ${contributeCapitalDto.amount} ${contributeCapitalDto.contribution_type.toUpperCase()}`);
+
+      // Xử lý coins cho response
+      let responseCoins: string[] = [];
+      if (savedInvestor.coins) {
+        if (typeof savedInvestor.coins === 'string') {
+          try {
+            const parsed = JSON.parse(savedInvestor.coins);
+            responseCoins = Array.isArray(parsed) ? parsed : [];
+          } catch (e) {
+            responseCoins = [];
+          }
+        } else if (Array.isArray(savedInvestor.coins)) {
+          responseCoins = savedInvestor.coins;
+        }
+      }
+
+      return {
+        success: true,
+        message: 'Capital contribution successful',
+        data: {
+          swap_investor_id: savedInvestor.swap_investor_id,
+          wallet_address: savedInvestor.wallet_address,
+          coins: responseCoins,
+          amount_sol: Number(savedInvestor.amount_sol),
+          amount_usdt: Number(savedInvestor.amount_usdt),
+          amount_usd: Number(savedInvestor.amount_usd),
+          active: savedInvestor.active,
+          created_at: savedInvestor.created_at,
+          updated_at: savedInvestor.updated_at,
+        },
+      };
+
+    } catch (error) {
+      this.logger.error(`Error contributing capital: ${error.message}`);
+      throw new BadRequestException(error.message);
+    }
+  }
+
+  /**
+   * Phân phối phần thưởng cho các nhà đầu tư dựa trên tỷ lệ đóng góp
+   * Chạy ngầm sau khi swap thành công
+   */
+  private async distributeInvestorRewards(feeAmount: number, swapOrderId: number): Promise<void> {
+    try {
+      this.logger.log(`Starting investor rewards distribution for swap order ${swapOrderId}, fee amount: ${feeAmount}`);
+
+      // 1. Lấy swap settings để lấy investor_share_percent
+      const swapSettings = await this.swapSettingsRepository.findOne({
+        where: {},
+        order: { swap_setting_id: 'DESC' }
+      });
+
+      if (!swapSettings) {
+        this.logger.error('Swap settings not found for investor rewards distribution');
+        return;
+      }
+
+      const investorSharePercent = Number(swapSettings.investor_share_percent);
+
+      // 2. Lấy tất cả nhà đầu tư active
+      const activeInvestors = await this.swapInvestorsRepository.find({
+        where: { active: true }
+      });
+
+      if (activeInvestors.length === 0) {
+        this.logger.log('No active investors found for rewards distribution');
+        return;
+      }
+
+      // 3. Tính tổng USD của tất cả nhà đầu tư
+      const totalUsdAmount = activeInvestors.reduce((sum, investor) => {
+        return sum + Number(investor.amount_usd);
+      }, 0);
+
+      if (totalUsdAmount <= 0) {
+        this.logger.log('Total USD amount is 0, no rewards to distribute');
+        return;
+      }
+
+      // 4. Tính toán và phân phối phần thưởng cho từng nhà đầu tư
+      const rewardPromises = activeInvestors.map(async (investor) => {
+        const investorUsdAmount = Number(investor.amount_usd);
+        
+        if (investorUsdAmount <= 0) {
+          return; // Bỏ qua nhà đầu tư không có đóng góp
+        }
+
+        // Công thức: (Số $ của nhà đầu tư / Tổng $ của tất cả nhà đầu tư) * investor_share_percent * Số $ khách hàng thực hiện swap
+        const investorShare = (investorUsdAmount / totalUsdAmount) * (investorSharePercent / 100) * feeAmount;
+        
+        if (investorShare <= 0) {
+          return; // Bỏ qua nếu phần thưởng = 0
+        }
+
+        // Lấy giá SOL hiện tại để chuyển đổi USD sang SOL
+        const solPriceUSD = await this.getSolPriceUSD();
+        const rewardSolAmount = investorShare / solPriceUSD;
+
+        // Tạo record phần thưởng
+        const rewardRecord = this.swapInvestorRewardRepository.create({
+          swap_order_id: swapOrderId,
+          investor_id: investor.swap_investor_id,
+          reward_sol_amount: rewardSolAmount
+        });
+
+        await this.swapInvestorRewardRepository.save(rewardRecord);
+
+        this.logger.log(`Distributed ${rewardSolAmount} SOL (${investorShare} USD) to investor ${investor.wallet_address} (${investorUsdAmount} USD contribution)`);
+
+        // TODO: Thực hiện gửi SOL thực tế cho nhà đầu tư
+        // await this.sendSolToInvestor(investor.wallet_address, rewardSolAmount);
+      });
+
+      await Promise.all(rewardPromises);
+
+      this.logger.log(`Completed investor rewards distribution for swap order ${swapOrderId}`);
+
+    } catch (error) {
+      this.logger.error(`Error in distributeInvestorRewards: ${error.message}`);
+      throw error;
+    }
   }
 } 

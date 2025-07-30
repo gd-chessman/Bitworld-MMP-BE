@@ -192,9 +192,10 @@ export class AdminController {
     @Query('wallet_auth') wallet_auth?: string,
     @Query('wallet_type') wallet_type?: 'main' | 'all',
     @Query('isBittworld') isBittworld?: string,
-    @Query('bittworld_uid') bittworld_uid?: string
+    @Query('bittworld_uid') bittworld_uid?: string,
+    @Query('bg_affiliate') bg_affiliate?: 'bg' | 'non_bg'
   ): Promise<{ data: ListWallet[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
-    return this.adminService.getListWallets(page, limit, search, wallet_auth, wallet_type, req.user, isBittworld, bittworld_uid);
+    return this.adminService.getListWallets(page, limit, search, wallet_auth, wallet_type, req.user, isBittworld, bittworld_uid, bg_affiliate);
   }
 
   @UseGuards(JwtAuthAdminGuard)
@@ -266,13 +267,14 @@ export class AdminController {
   @ApiResponse({ status: 201, description: 'BG affiliate created successfully' })
   @ApiResponse({ status: 400, description: 'Wallet already in BG affiliate system or invalid commission percent' })
   async createBgAffiliate(
+    @Request() req: any,
     @Body() data: {
       walletId: number;
       totalCommissionPercent: number;
       batAlias: string;
     }
   ): Promise<{ message: string; treeId: number; totalCommissionPercent: number; batAlias: string; walletInfo: any }> {
-    const result = await this.adminService.createBgAffiliate(data);
+    const result = await this.adminService.createBgAffiliate(data, req.user);
     
     // Lấy thông tin wallet để trả về
     const wallet = await this.adminService.getWalletInfo(data.walletId);
@@ -288,6 +290,7 @@ export class AdminController {
   @ApiOperation({ summary: 'Admin update root BG commission (only root BG, with minimum check)' })
   @ApiResponse({ status: 200, description: 'Root BG commission updated successfully' })
   async updateBgAffiliateCommission(
+    @Request() req: any,
     @Body() data: {
       rootWalletId?: number;
       treeId?: number;
@@ -302,7 +305,7 @@ export class AdminController {
     minRequiredPercent: number | null;
     treeInfo: any;
   }> {
-    return this.adminService.updateBgAffiliateCommission(data);
+    return this.adminService.updateBgAffiliateCommission(data, req.user);
   }
 
   @UseGuards(JwtAuthAdminGuard)
@@ -355,6 +358,7 @@ export class AdminController {
   @ApiOperation({ summary: 'Update BG affiliate node status' })
   @ApiResponse({ status: 200, description: 'Node status updated successfully' })
   async updateBgAffiliateNodeStatus(
+    @Request() req: any,
     @Body() data: {
       walletId: number;
       status: boolean;
@@ -367,7 +371,7 @@ export class AdminController {
     newStatus: boolean;
     nodeInfo?: any;
   }> {
-    return this.adminService.updateBgAffiliateNodeStatus(data);
+    return this.adminService.updateBgAffiliateNodeStatus(data, req.user);
   }
 
 

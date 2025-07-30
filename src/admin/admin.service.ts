@@ -376,7 +376,8 @@ export class AdminService implements OnModuleInit {
     wallet_type?: 'main' | 'all',
     currentUser?: UserAdmin,
     isBittworld?: string,
-    bittworld_uid?: string
+    bittworld_uid?: string,
+    bg_affiliate?: 'bg' | 'non_bg'
   ): Promise<{ data: ListWallet[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
     const skip = (page - 1) * limit;
     
@@ -401,19 +402,11 @@ export class AdminService implements OnModuleInit {
     const whereConditions: string[] = [];
     const parameters: any = {};
 
-    // Kiểm tra role của user hiện tại
-    if (currentUser && currentUser.role === AdminRole.PARTNER) {
-      // Nếu role là PARTNER, chỉ lấy những ví có isBittworld = true
-      // Bỏ qua filter isBittworld từ user nếu có
+    // Filter by isBittworld
+    if (isBittworld !== undefined && isBittworld !== '') {
+      const isBittworldBool = isBittworld.toLowerCase() === 'true';
       whereConditions.push('wallet.isBittworld = :isBittworld');
-      parameters['isBittworld'] = true;
-    } else {
-      // Role khác (ADMIN, MEMBER) - cho phép filter isBittworld
-      if (isBittworld !== undefined && isBittworld !== '') {
-        const isBittworldBool = isBittworld.toLowerCase() === 'true';
-        whereConditions.push('wallet.isBittworld = :isBittworld');
-        parameters['isBittworld'] = isBittworldBool;
-      }
+      parameters['isBittworld'] = isBittworldBool;
     }
 
     if (search) {
@@ -440,6 +433,18 @@ export class AdminService implements OnModuleInit {
         // Những cái không có bittworld_uid
         whereConditions.push('(wallet.bittworld_uid IS NULL OR wallet.bittworld_uid = \'\')');
       }
+    }
+
+    // Filter by BG affiliate status
+    if (bg_affiliate) {
+      if (bg_affiliate === 'bg') {
+        // Chỉ lấy ví có trong BG affiliate system
+        whereConditions.push('EXISTS (SELECT 1 FROM bg_affiliate_nodes ban WHERE ban.ban_wallet_id = wallet.wallet_id)');
+      } else if (bg_affiliate === 'non_bg') {
+        // Chỉ lấy ví không có trong BG affiliate system
+        whereConditions.push('NOT EXISTS (SELECT 1 FROM bg_affiliate_nodes ban WHERE ban.ban_wallet_id = wallet.wallet_id)');
+      }
+      // Nếu bg_affiliate = 'all' hoặc giá trị khác, không thêm điều kiện lọc (lấy tất cả)
     }
 
     // Apply where conditions
@@ -731,36 +736,43 @@ export class AdminService implements OnModuleInit {
     walletId: number;
     totalCommissionPercent: number;
     batAlias: string;
-  }): Promise<{ message: string; treeId: number; totalCommissionPercent: number; batAlias: string }> {
+  }, currentUser?: UserAdmin): Promise<{ message: string; treeId: number; totalCommissionPercent: number; batAlias: string }> {
     // Kiểm tra wallet có tồn tại không
     const wallet = await this.listWalletRepository.findOne({
       where: { wallet_id: data.walletId }
     });
 
     if (!wallet) {
-      throw new NotFoundException(`Wallet với ID ${data.walletId} không tồn tại`);
+      throw new NotFoundException(`Wallet with ID ${data.walletId} does not exist`);
     }
 
-    // Kiểm tra wallet đã có cây affiliate chưa (đã là root BG)
+    // Check PARTNER role - only allow creating BG affiliate for wallets with isBittworld = true
+    if (currentUser && currentUser.role === AdminRole.PARTNER) {
+      if (!wallet.isBittworld) {
+        throw new BadRequestException('PARTNER role can only create BG affiliate for wallets with isBittworld = true');
+      }
+    }
+
+    // Check if wallet already has an affiliate tree (already a root BG)
     const existingTree = await this.bgRefService.getWalletBgAffiliateInfo(data.walletId);
     if (existingTree) {
-      throw new BadRequestException('Wallet đã có cây affiliate BG, không thể tạo thêm');
+      throw new BadRequestException('Wallet already has a BG affiliate tree, cannot create another one');
     }
 
-    // Kiểm tra wallet có thuộc luồng giới thiệu của BG nào không
+    // Check if wallet belongs to another BG affiliate system
     const isInBgAffiliateSystem = await this.bgRefService.isWalletInBgAffiliateSystem(data.walletId);
     if (isInBgAffiliateSystem) {
-      throw new BadRequestException('Wallet đã thuộc luồng giới thiệu của BG khác, không thể cấp quyền BG');
+      throw new BadRequestException('Wallet already belongs to another BG affiliate system, cannot grant BG permission');
     }
 
-    // Kiểm tra commission percent hợp lệ
+    // Check if commission percent is valid
     if (data.totalCommissionPercent < 0 || data.totalCommissionPercent > 100) {
-      throw new BadRequestException('Commission percent phải từ 0 đến 100');
+      throw new BadRequestException('Commission percent must be between 0 and 100');
     }
 
-    // Kiểm tra bat_alias không được rỗng
+    // Check if bat_alias is not empty
     if (!data.batAlias || data.batAlias.trim() === '') {
-      throw new BadRequestException('batAlias không được để trống');
+      throw new BadRequestException('batAlias cannot be empty');
     }
 
     // Tạo cây affiliate mới
@@ -771,7 +783,7 @@ export class AdminService implements OnModuleInit {
     );
 
     return {
-      message: 'Tạo BG affiliate thành công',
+      message: 'BG affiliate created successfully',
       treeId: tree.bat_id,
       totalCommissionPercent: data.totalCommissionPercent,
       batAlias: tree.bat_alias
@@ -787,7 +799,7 @@ export class AdminService implements OnModuleInit {
     treeId?: number;
     newPercent: number;
     batAlias?: string;
-  }): Promise<{ 
+  }, currentUser?: UserAdmin): Promise<{ 
     success: boolean;
     message: string;
     oldPercent: number;
@@ -795,14 +807,43 @@ export class AdminService implements OnModuleInit {
     minRequiredPercent: number | null;
     treeInfo: any;
   }> {
-    // Cập nhật commission
+    // Check PARTNER role - only allow updating commission for wallets with isBittworld = true
+    if (currentUser && currentUser.role === AdminRole.PARTNER) {
+      let walletId: number;
+      
+      if (data.rootWalletId) {
+        walletId = data.rootWalletId;
+      } else if (data.treeId) {
+        // Get root wallet ID from tree
+        const tree = await this.bgRefService['bgAffiliateTreeRepository'].findOne({
+          where: { bat_id: data.treeId }
+        });
+        if (!tree) {
+          throw new NotFoundException('BG affiliate tree not found');
+        }
+        walletId = tree.bat_root_wallet_id;
+      } else {
+        throw new BadRequestException('Must provide rootWalletId or treeId');
+      }
+
+      // Check if wallet is Bittworld
+      const wallet = await this.listWalletRepository.findOne({
+        where: { wallet_id: walletId }
+      });
+      
+      if (!wallet || !wallet.isBittworld) {
+        throw new BadRequestException('PARTNER role can only update commission for wallets with isBittworld = true');
+      }
+    }
+
+    // Update commission
     let result;
     if (data.rootWalletId) {
       result = await this.bgRefService.adminUpdateRootBgCommission(data.rootWalletId, data.newPercent);
     } else if (data.treeId) {
       result = await this.bgRefService.adminUpdateRootBgCommissionByTreeId(data.treeId, data.newPercent);
     } else {
-      throw new BadRequestException('Phải cung cấp rootWalletId hoặc treeId');
+      throw new BadRequestException('Must provide rootWalletId or treeId');
     }
 
     // Cập nhật alias nếu có
@@ -870,14 +911,6 @@ export class AdminService implements OnModuleInit {
         };
       })
     );
-
-    // Kiểm tra role của user hiện tại
-    if (currentUser && currentUser.role === AdminRole.PARTNER) {
-      // Nếu role là PARTNER, chỉ lấy những trees có root wallet với isBittworld = true
-      treesWithWalletInfo = treesWithWalletInfo.filter(tree => 
-        tree.rootWallet && tree.rootWallet.isBittworld === true
-      );
-    }
     
     return treesWithWalletInfo;
   }
@@ -1556,7 +1589,7 @@ export class AdminService implements OnModuleInit {
   async updateBgAffiliateNodeStatus(data: {
     walletId: number;
     status: boolean;
-  }): Promise<{ 
+  }, currentUser?: UserAdmin): Promise<{ 
     success: boolean;
     message: string;
     walletId: number;
@@ -1570,22 +1603,29 @@ export class AdminService implements OnModuleInit {
     });
 
     if (!wallet) {
-      throw new NotFoundException(`Wallet với ID ${data.walletId} không tồn tại`);
+      throw new NotFoundException(`Wallet with ID ${data.walletId} does not exist`);
     }
 
-    // Kiểm tra wallet có trong hệ thống BG affiliate không
+    // Check PARTNER role - only allow updating status for wallets with isBittworld = true
+    if (currentUser && currentUser.role === AdminRole.PARTNER) {
+      if (!wallet.isBittworld) {
+        throw new BadRequestException('PARTNER role can only update status for wallets with isBittworld = true');
+      }
+    }
+
+    // Check if wallet belongs to BG affiliate system
     const bgAffiliateInfo = await this.bgRefService.getWalletBgAffiliateInfo(data.walletId);
     if (!bgAffiliateInfo) {
-      throw new BadRequestException('Wallet không thuộc hệ thống BG affiliate');
+      throw new BadRequestException('Wallet does not belong to BG affiliate system');
     }
 
-    // Lấy node hiện tại
+    // Get current node
     const node = await this.bgRefService['bgAffiliateNodeRepository'].findOne({
       where: { ban_wallet_id: data.walletId }
     });
 
     if (!node) {
-      throw new NotFoundException('Không tìm thấy node BG affiliate');
+      throw new NotFoundException('BG affiliate node not found');
     }
 
     const oldStatus = node.ban_status;
@@ -1611,8 +1651,8 @@ export class AdminService implements OnModuleInit {
 
     const isRoot = node.ban_parent_wallet_id === null;
     const statusMessage = isRoot && !data.status 
-      ? `Cập nhật trạng thái root BG thành công: ${data.status ? 'Bật' : 'Tắt'} (Cảnh báo: Root BG đã bị tắt)`
-      : `Cập nhật trạng thái BG affiliate node thành công: ${data.status ? 'Bật' : 'Tắt'}`;
+      ? `Root BG status updated successfully: ${data.status ? 'Enabled' : 'Disabled'} (Warning: Root BG has been disabled)`
+      : `BG affiliate node status updated successfully: ${data.status ? 'Enabled' : 'Disabled'}`;
 
     return {
       success: true,

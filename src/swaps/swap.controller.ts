@@ -1,6 +1,7 @@
 import { Controller, Post, Get, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
 import { SwapService } from './swap.service';
 import { CreateSwapDto } from './dto/create-swap.dto';
+import { ContributeCapitalDto } from './dto/contribute-capital.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @Controller('swaps')
@@ -15,6 +16,15 @@ export class SwapController {
   ) {
     const walletId = req.user.wallet_id;
     return await this.swapService.createSwap(createSwapDto, walletId);
+  }
+
+  @Post('contribute-capital')
+  async contributeCapital(
+    @Body() contributeCapitalDto: ContributeCapitalDto,
+    @Request() req: any,
+  ) {
+    const wallet_address = req.user.sol_public_key;
+    return await this.swapService.contributeCapital(contributeCapitalDto, wallet_address);
   }
 
   @Get(':swapOrderId')

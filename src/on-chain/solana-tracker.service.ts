@@ -755,8 +755,14 @@ export class SolanaTrackerService implements OnModuleInit {
                 };
             }));
 
+            // Lọc bỏ các token có program bắt đầu từ "pumpfun"
+            const filteredItems = items.filter(item => {
+                const program = item.program?.toLowerCase() || '';
+                return !program.startsWith('pumpfun');
+            });
+
             // Sắp xếp danh sách token theo tiêu chí
-            items.sort((a, b) => {
+            filteredItems.sort((a, b) => {
                 let valueA = a[sortBy];
                 let valueB = b[sortBy];
 
@@ -771,13 +777,13 @@ export class SolanaTrackerService implements OnModuleInit {
             });
 
             // Giới hạn số lượng kết quả
-            const limitedItems = items.slice(0, maxLimit);
+            const limitedItems = filteredItems.slice(0, maxLimit);
 
             return {
                 success: true,
                 data: {
                     items: limitedItems,
-                    has_next: tokens.length > limitedItems.length
+                    has_next: filteredItems.length > limitedItems.length
                 }
             };
         } catch (error) {
