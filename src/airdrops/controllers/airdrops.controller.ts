@@ -94,6 +94,96 @@ export class AirdropsController {
         return await this.airdropsService.stakePool(walletId, stakePoolDto);
     }
 
+    @Get('check-balance')
+    @ApiOperation({
+        summary: 'Check wallet balance for staking',
+        description: 'Check current token X balance and validate if wallet can stake specified amount'
+    })
+    @ApiResponse({
+        status: HttpStatus.OK,
+        description: 'Balance check completed',
+        schema: {
+            type: 'object',
+            properties: {
+                success: { type: 'boolean' },
+                message: { type: 'string' },
+                data: {
+                    type: 'object',
+                    properties: {
+                        currentBalance: { type: 'number' },
+                        currentBalanceInTokens: { type: 'number' },
+                        maxPossibleStake: { type: 'number' },
+                        suggestions: { type: 'array', items: { type: 'string' } }
+                    }
+                }
+            }
+        }
+    })
+    @ApiResponse({
+        status: HttpStatus.UNAUTHORIZED,
+        description: 'Unauthorized access'
+    })
+    @ApiResponse({
+        status: HttpStatus.INTERNAL_SERVER_ERROR,
+        description: 'Server error'
+    })
+    async checkBalance(@Request() req: any, @Query('stakeAmount') stakeAmount?: string) {
+        // Get wallet_id from JWT token
+        const walletId = req.user.wallet_id;
+        
+        if (!walletId) {
+            throw new Error('Wallet ID not found in token');
+        }
+
+        const amount = stakeAmount ? parseInt(stakeAmount) : 1000000; // Default 1M tokens
+        return await this.airdropsService.checkWalletBalanceForStake(walletId, amount);
+    }
+
+    @Get('suggest-stake-amount')
+    @ApiOperation({
+        summary: 'Get suggested stake amount based on wallet balance',
+        description: 'Get the maximum possible stake amount and suggestions based on current wallet balance'
+    })
+    @ApiResponse({
+        status: HttpStatus.OK,
+        description: 'Suggestions provided',
+        schema: {
+            type: 'object',
+            properties: {
+                success: { type: 'boolean' },
+                message: { type: 'string' },
+                data: {
+                    type: 'object',
+                    properties: {
+                        currentBalance: { type: 'number' },
+                        currentBalanceInTokens: { type: 'number' },
+                        maxPossibleStake: { type: 'number' },
+                        suggestedAmounts: { type: 'array', items: { type: 'number' } },
+                        suggestions: { type: 'array', items: { type: 'string' } }
+                    }
+                }
+            }
+        }
+    })
+    @ApiResponse({
+        status: HttpStatus.UNAUTHORIZED,
+        description: 'Unauthorized access'
+    })
+    @ApiResponse({
+        status: HttpStatus.INTERNAL_SERVER_ERROR,
+        description: 'Server error'
+    })
+    async suggestStakeAmount(@Request() req: any) {
+        // Get wallet_id from JWT token
+        const walletId = req.user.wallet_id;
+        
+        if (!walletId) {
+            throw new Error('Wallet ID not found in token');
+        }
+
+        return await this.airdropsService.suggestStakeAmount(walletId);
+    }
+
     @Get('pools')
     @ApiOperation({
         summary: 'Get airdrop pools list',

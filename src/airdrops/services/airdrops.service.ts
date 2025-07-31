@@ -16,7 +16,7 @@ import { GetPoolsDto, PoolSortField, PoolSortOrder, PoolFilterType } from '../dt
 import { SolanaService } from '../../solana/solana.service';
 import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
-import { getAssociatedTokenAddress as getATA } from '@project-serum/associated-token';
+import { getAssociatedTokenAddress } from '@solana/spl-token';
 import bs58 from 'bs58';
 import { RedisLockService } from '../../common/services/redis-lock.service';
 import { CloudinaryService } from '../../common/cloudinary/cloudinary.service';
@@ -189,6 +189,12 @@ export class AirdropsService {
                         break;
                     }
                     
+                    // Get token decimals and calculate correct amount
+                    const adjustedAmount = await this.calculateTokenAmount(mintTokenAirdrop, createPoolDto.initialAmount);
+                    
+                    this.logger.debug(`Original amount: ${createPoolDto.initialAmount}`);
+                    this.logger.debug(`Adjusted amount: ${adjustedAmount} raw units`);
+                    
                     // Create unique transaction ID to avoid duplication
                     const transactionId = `pool_${savedPool.alp_id}_${Date.now()}_${Math.random()}`;
                     
@@ -196,7 +202,7 @@ export class AirdropsService {
                         wallet.wallet_private_key,
                         mintTokenAirdrop,
                         walletBittAddress,
-                        createPoolDto.initialAmount,
+                        adjustedAmount,
                         transactionId
                     );
 
@@ -262,6 +268,22 @@ export class AirdropsService {
         
         // Use withLock to automatically handle lock/release
         return await this.redisLockService.withLock(lockKey, async () => {
+            this.logger.log(`Starting stake pool process for wallet ${walletId}, pool ${stakePoolDto.poolId}, amount ${stakePoolDto.stakeAmount}`);
+
+            // 0. Validate stake amount
+            if (!stakePoolDto.stakeAmount || stakePoolDto.stakeAmount <= 0) {
+                throw new BadRequestException('Stake amount must be greater than 0');
+            }
+
+            if (stakePoolDto.stakeAmount < 0.001) {
+                throw new BadRequestException('Minimum stake amount is 0.001 token');
+            }
+
+            // Check if stake amount is reasonable (not too large)
+            if (stakePoolDto.stakeAmount > 1000000000) {
+                throw new BadRequestException('Stake amount cannot exceed 1 billion tokens');
+            }
+
             // 1. Check if pool exists and is active
             const pool = await this.airdropListPoolRepository.findOne({
                 where: { alp_id: stakePoolDto.poolId }
@@ -272,7 +294,7 @@ export class AirdropsService {
             }
 
             if (pool.apl_status !== AirdropPoolStatus.ACTIVE) {
-                throw new BadRequestException('Pool is not in active status');
+                throw new BadRequestException(`Pool is not in active status. Current status: ${pool.apl_status}`);
             }
 
             // 2. Check if user already has stake record in this pool
@@ -283,6 +305,11 @@ export class AirdropsService {
                 }
             });
 
+            // Check if user is the creator of this pool
+            const isCreator = pool.alp_originator === walletId;
+            this.logger.debug(`User ${walletId} is ${isCreator ? 'creator' : 'member'} of pool ${stakePoolDto.poolId}`);
+            this.logger.debug(`Existing join record: ${existingJoin ? 'Yes' : 'No'}`);
+
             // 3. Get wallet information
             const wallet = await this.listWalletRepository.findOne({
                 where: { wallet_id: walletId }
@@ -292,7 +319,9 @@ export class AirdropsService {
                 throw new BadRequestException('Wallet does not exist');
             }
 
-            // 4. Check token X balance
+
+
+            // 4. Check token X balance (using same logic as createPool)
             const mintTokenAirdrop = this.configService.get<string>('MINT_TOKEN_AIRDROP');
             if (!mintTokenAirdrop) {
                 throw new HttpException('MINT_TOKEN_AIRDROP configuration does not exist', HttpStatus.INTERNAL_SERVER_ERROR);
@@ -302,10 +331,21 @@ export class AirdropsService {
                 wallet.wallet_solana_address,
                 mintTokenAirdrop
             );
+            this.logger.debug(`Wallet ${wallet.wallet_solana_address} token balance: ${tokenBalance} (raw units)`);
+            this.logger.debug(`Requested stake amount: ${stakePoolDto.stakeAmount} tokens`);
 
+            // Calculate required raw units for stake (same as createPool logic)
+            const adjustedStakeAmount = await this.calculateTokenAmount(mintTokenAirdrop, stakePoolDto.stakeAmount);
+            
+            this.logger.debug(`Original stake amount: ${stakePoolDto.stakeAmount} tokens`);
+            this.logger.debug(`Adjusted stake amount: ${adjustedStakeAmount} raw units`);
+            
+            // Compare raw balance with token amount (same logic as createPool)
             if (tokenBalance < stakePoolDto.stakeAmount) {
                 throw new BadRequestException(`Insufficient token X balance. Current: ${tokenBalance}, Required: ${stakePoolDto.stakeAmount}`);
             }
+
+
 
             // 5. Check SOL balance and transfer fee if needed
             let solBalance = await this.solanaService.getBalance(wallet.wallet_solana_address);
@@ -390,7 +430,7 @@ export class AirdropsService {
             // Try transaction up to 3 times
             for (let attempt = 1; attempt <= this.MAX_RETRY_ATTEMPTS; attempt++) {
                 try {
-                    this.logger.log(`Executing stake token transaction attempt ${attempt} for join ${savedJoin.apj_id}`);
+                    this.logger.log(`Executing stake token transaction attempt ${attempt}/${this.MAX_RETRY_ATTEMPTS} for join ${savedJoin.apj_id}`);
                     
                     // Check if any transaction has already been sent for this join
                     const existingJoinRecord = await this.airdropPoolJoinRepository.findOne({
@@ -407,13 +447,26 @@ export class AirdropsService {
                     // Create unique transaction ID to avoid duplication
                     const transactionId = `stake_${savedJoin.apj_id}_${Date.now()}_${Math.random()}`;
                     
+                    this.logger.debug(`Starting stake token transfer for join ${savedJoin.apj_id}`);
+                    this.logger.debug(`Wallet: ${wallet.wallet_solana_address}`);
+                    this.logger.debug(`Destination: ${walletBittAddress}`);
+                    this.logger.debug(`Transaction ID: ${transactionId}`);
+                    
+                    // Use the already calculated adjusted amount
+                    this.logger.debug(`Using pre-calculated adjusted stake amount: ${adjustedStakeAmount} raw units`);
+                    this.logger.debug(`Token mint: ${mintTokenAirdrop}`);
+                    
+
+                    
                     transactionHash = await this.transferTokenToBittWallet(
                         wallet.wallet_private_key,
                         mintTokenAirdrop,
                         walletBittAddress,
-                        stakePoolDto.stakeAmount,
+                        adjustedStakeAmount,
                         transactionId
                     );
+
+                    this.logger.log(`Stake transaction sent with signature: ${transactionHash}, transactionId: ${transactionId}`);
 
                     // Wait for transaction to be confirmed
                     await this.waitForTransactionConfirmation(transactionHash);
@@ -423,14 +476,14 @@ export class AirdropsService {
                     break;
 
                 } catch (error) {
-                    this.logger.error(`Attempt ${attempt} failed: ${error.message}`);
+                    this.logger.error(`Stake transaction attempt ${attempt}/${this.MAX_RETRY_ATTEMPTS} failed: ${error.message}`);
                     
                     if (attempt === this.MAX_RETRY_ATTEMPTS) {
-                        this.logger.error(`Tried maximum ${this.MAX_RETRY_ATTEMPTS} times but still failed`);
+                        this.logger.error(`Tried maximum ${this.MAX_RETRY_ATTEMPTS} times but stake transaction still failed`);
                         break;
                     }
                     
-                    // Wait 3 seconds before retrying
+                    this.logger.log(`Waiting 3 seconds before retry ${attempt + 1}...`);
                     await new Promise(resolve => setTimeout(resolve, 3000));
                 }
             }
@@ -464,21 +517,27 @@ export class AirdropsService {
 
             // 10. Log final result
             if (success) {
-                this.logger.log(`Join ${savedJoin.apj_id} created successfully with transaction hash: ${transactionHash}`);
+                this.logger.log(`✅ Join ${savedJoin.apj_id} created successfully with transaction hash: ${transactionHash}`);
+                this.logger.log(`📊 Pool ${stakePoolDto.poolId} updated: +${stakePoolDto.stakeAmount} tokens, member increment: ${existingJoin ? 0 : 1}`);
             } else {
-                this.logger.error(`Join ${savedJoin.apj_id} creation failed due to onchain transaction failure`);
+                this.logger.error(`❌ Join ${savedJoin.apj_id} creation failed due to onchain transaction failure`);
+                this.logger.error(`🔍 Final transaction hash: ${transactionHash}`);
             }
+
+            const responseData = {
+                joinId: savedJoin.apj_id,
+                poolId: stakePoolDto.poolId,
+                stakeAmount: stakePoolDto.stakeAmount,
+                status: finalStatus,
+                transactionHash: transactionHash === 'already_processed' ? null : transactionHash
+            };
+
+            this.logger.log(`🎯 Stake pool response:`, responseData);
 
             return {
                 success: true,
                 message: success ? 'Stake pool successful' : 'Stake pool failed due to onchain transaction',
-                data: {
-                    joinId: savedJoin.apj_id,
-                    poolId: stakePoolDto.poolId,
-                    stakeAmount: stakePoolDto.stakeAmount,
-                    status: finalStatus,
-                    transactionHash: transactionHash === 'already_processed' ? null : transactionHash
-                }
+                data: responseData
             };
         }, this.LOCK_TTL * 1000); // Convert to milliseconds
     }
@@ -891,16 +950,33 @@ export class AirdropsService {
             // Create unique transaction to avoid duplication
             const uniqueId = transactionId || `${Date.now()}_${Math.random()}`;
             
-            // Get token accounts
-            const sourceTokenAccount = await getATA(
+            this.logger.debug(`Token mint: ${tokenMint}`);
+            this.logger.debug(`Source wallet: ${keypair.publicKey.toString()}`);
+            this.logger.debug(`Destination wallet: ${destinationWallet}`);
+            
+            // Get or create token accounts
+            const sourceTokenAccount = await this.getOrCreateATA(
+                keypair,
                 new PublicKey(tokenMint),
                 keypair.publicKey
             );
 
-            const destinationTokenAccount = await getATA(
+            const destinationTokenAccount = await this.getOrCreateATA(
+                keypair,
                 new PublicKey(tokenMint),
                 new PublicKey(destinationWallet)
             );
+
+            this.logger.debug(`Source token account: ${sourceTokenAccount.toString()}`);
+            this.logger.debug(`Destination token account: ${destinationTokenAccount.toString()}`);
+            this.logger.debug(`Transfer amount: ${amount} (raw number)`);
+
+            // Get token decimals to understand the amount
+            const { getMint } = require('@solana/spl-token');
+            const mintInfo = await getMint(this.connection, new PublicKey(tokenMint));
+            this.logger.debug(`Token decimals: ${mintInfo.decimals}`);
+            this.logger.debug(`Transfer amount in tokens: ${amount / Math.pow(10, mintInfo.decimals)}`);
+            this.logger.debug(`Token mint: ${tokenMint}`);
 
             // Create transfer instruction using SPL Token
             const { createTransferInstruction } = require('@solana/spl-token');
@@ -927,6 +1003,75 @@ export class AirdropsService {
 
         } catch (error) {
             this.logger.error(`Error transferring token: ${error.message}`);
+            throw error;
+        }
+    }
+
+    private async getTokenInfo(tokenMint: string): Promise<{ decimals: number; supply: number; mintAuthority: string | null }> {
+        try {
+            const { getMint } = require('@solana/spl-token');
+            const mintInfo = await getMint(this.connection, new PublicKey(tokenMint));
+            
+            this.logger.debug(`Token mint: ${tokenMint}`);
+            this.logger.debug(`Token decimals: ${mintInfo.decimals}`);
+            this.logger.debug(`Token supply: ${mintInfo.supply}`);
+            this.logger.debug(`Mint authority: ${mintInfo.mintAuthority?.toString() || 'null'}`);
+            
+            return {
+                decimals: mintInfo.decimals,
+                supply: Number(mintInfo.supply),
+                mintAuthority: mintInfo.mintAuthority?.toString() || null
+            };
+            
+        } catch (error) {
+            this.logger.error(`Error getting token info: ${error.message}`);
+            throw error;
+        }
+    }
+
+    private async calculateTokenAmount(tokenMint: string, tokenAmount: number): Promise<number> {
+        try {
+            // Get token info including decimals
+            const tokenInfo = await this.getTokenInfo(tokenMint);
+            
+            this.logger.debug(`Original token amount: ${tokenAmount}`);
+            
+            // Calculate raw units based on decimals
+            const rawUnits = tokenAmount * Math.pow(10, tokenInfo.decimals);
+            
+            this.logger.debug(`Calculated raw units: ${rawUnits}`);
+            this.logger.debug(`Equivalent token amount: ${rawUnits / Math.pow(10, tokenInfo.decimals)}`);
+            
+            return rawUnits;
+            
+        } catch (error) {
+            this.logger.error(`Error calculating token amount: ${error.message}`);
+            throw error;
+        }
+    }
+
+    private async getOrCreateATA(
+        owner: any,
+        mint: PublicKey,
+        ownerAddress: PublicKey
+    ): Promise<PublicKey> {
+        try {
+            this.logger.debug(`Getting ATA for mint: ${mint.toString()}, owner: ${ownerAddress.toString()}`);
+            
+            const { getOrCreateAssociatedTokenAccount } = require('@solana/spl-token');
+            
+            const tokenAccount = await getOrCreateAssociatedTokenAccount(
+                this.connection,
+                owner,
+                mint,
+                ownerAddress
+            );
+            
+            this.logger.debug(`ATA address: ${tokenAccount.address.toString()}`);
+            return tokenAccount.address;
+            
+        } catch (error) {
+            this.logger.error(`Error creating ATA: ${error.message}`);
             throw error;
         }
     }
@@ -1010,13 +1155,30 @@ export class AirdropsService {
 
         while (retries < maxRetries) {
             try {
-                const status = await this.solanaService.checkTransactionStatus(signature);
-                
-                if (status === 'confirmed' || status === 'finalized') {
-                    this.logger.log(`Transaction ${signature} đã được confirm với status: ${status}`);
+                // Kiểm tra trực tiếp từ Solana connection
+                const signatureStatus = await this.connection.getSignatureStatus(signature, {
+                    searchTransactionHistory: true
+                });
+
+                this.logger.debug(`Transaction ${signature} status check ${retries + 1}:`, {
+                    signature: signatureStatus?.value?.confirmationStatus,
+                    err: signatureStatus?.value?.err,
+                    slot: signatureStatus?.context?.slot
+                });
+
+                if (signatureStatus?.value?.err) {
+                    throw new Error(`Transaction ${signature} đã thất bại: ${JSON.stringify(signatureStatus.value.err)}`);
+                }
+
+                if (signatureStatus?.value?.confirmationStatus === 'confirmed' || 
+                    signatureStatus?.value?.confirmationStatus === 'finalized') {
+                    this.logger.log(`Transaction ${signature} đã được confirm với status: ${signatureStatus.value.confirmationStatus}`);
                     return;
-                } else if (status === 'failed') {
-                    throw new Error(`Transaction ${signature} đã thất bại`);
+                }
+
+                // Kiểm tra xem transaction có tồn tại trên blockchain không (đã được gửi thành công)
+                if (signatureStatus?.value && !signatureStatus.value.err) {
+                    this.logger.log(`Transaction ${signature} đã được gửi thành công, đang chờ confirm...`);
                 }
                 
                 // Nếu vẫn pending, chờ và thử lại
@@ -1037,6 +1199,215 @@ export class AirdropsService {
         }
         
         throw new Error(`Transaction ${signature} không được confirm trong thời gian chờ`);
+    }
+
+    private async checkTransactionExists(signature: string): Promise<boolean> {
+        try {
+            // Kiểm tra xem transaction có tồn tại trên blockchain không
+            const signatureStatus = await this.connection.getSignatureStatus(signature, {
+                searchTransactionHistory: true
+            });
+
+            // Nếu có signatureStatus và không có lỗi, transaction đã tồn tại
+            return !!(signatureStatus?.value && !signatureStatus.value.err);
+        } catch (error) {
+            this.logger.error(`Error checking transaction existence: ${error.message}`);
+            return false;
+        }
+    }
+
+    private async checkWalletBalance(walletAddress: string, tokenMint: string, requiredAmount: number): Promise<{
+        hasEnoughBalance: boolean;
+        currentBalance: number;
+        currentBalanceInTokens: number;
+        requiredAmountInTokens: number;
+        tokenInfo: { decimals: number; supply: number; mintAuthority: string | null };
+    }> {
+        try {
+            // Get token info
+            const tokenInfo = await this.getTokenInfo(tokenMint);
+            
+            // Get current balance
+            const currentBalance = await this.solanaService.getTokenBalance(walletAddress, tokenMint);
+            
+            // Calculate amounts in tokens
+            const currentBalanceInTokens = currentBalance / Math.pow(10, tokenInfo.decimals);
+            const requiredAmountInTokens = requiredAmount / Math.pow(10, tokenInfo.decimals);
+            
+            // Check if enough balance
+            const hasEnoughBalance = currentBalance >= requiredAmount;
+            
+            this.logger.debug(`Balance check for wallet ${walletAddress}:`);
+            this.logger.debug(`  - Token mint: ${tokenMint}`);
+            this.logger.debug(`  - Token decimals: ${tokenInfo.decimals}`);
+            this.logger.debug(`  - Current balance: ${currentBalanceInTokens.toFixed(tokenInfo.decimals)} tokens (${currentBalance} raw units)`);
+            this.logger.debug(`  - Required amount: ${requiredAmountInTokens.toFixed(tokenInfo.decimals)} tokens (${requiredAmount} raw units)`);
+            this.logger.debug(`  - Has enough balance: ${hasEnoughBalance}`);
+            
+            return {
+                hasEnoughBalance,
+                currentBalance,
+                currentBalanceInTokens,
+                requiredAmountInTokens,
+                tokenInfo
+            };
+            
+        } catch (error) {
+            this.logger.error(`Error checking wallet balance: ${error.message}`);
+            throw error;
+        }
+    }
+
+    private async validateStakeAmount(walletAddress: string, tokenMint: string, stakeAmount: number): Promise<{
+        isValid: boolean;
+        currentBalance: number;
+        currentBalanceInTokens: number;
+        maxPossibleStake: number;
+        suggestions: string[];
+    }> {
+        try {
+            // Get token info first
+            const tokenInfo = await this.getTokenInfo(tokenMint);
+            const requiredRawUnits = stakeAmount * Math.pow(10, tokenInfo.decimals);
+            
+            const balanceCheck = await this.checkWalletBalance(walletAddress, tokenMint, requiredRawUnits);
+            
+            const maxPossibleStake = Math.floor(balanceCheck.currentBalanceInTokens);
+            const suggestions: string[] = [];
+            
+            if (!balanceCheck.hasEnoughBalance) {
+                if (maxPossibleStake >= 1) {
+                    suggestions.push(`Try staking ${maxPossibleStake} tokens or less`);
+                }
+                suggestions.push('Transfer more tokens to your wallet');
+                suggestions.push('Check your token balance on Solana explorer');
+            }
+            
+            return {
+                isValid: balanceCheck.hasEnoughBalance,
+                currentBalance: balanceCheck.currentBalance,
+                currentBalanceInTokens: balanceCheck.currentBalanceInTokens,
+                maxPossibleStake,
+                suggestions
+            };
+            
+        } catch (error) {
+            this.logger.error(`Error validating stake amount: ${error.message}`);
+            throw error;
+        }
+    }
+
+    async checkWalletBalanceForStake(walletId: number, stakeAmount: number = 1000000) {
+        try {
+            this.logger.log(`Checking wallet balance for stake: wallet ${walletId}, amount ${stakeAmount}`);
+
+            // Get wallet information
+            const wallet = await this.listWalletRepository.findOne({
+                where: { wallet_id: walletId }
+            });
+
+            if (!wallet) {
+                throw new BadRequestException('Wallet does not exist');
+            }
+
+            // Get token mint
+            const mintTokenAirdrop = this.configService.get<string>('MINT_TOKEN_AIRDROP');
+            if (!mintTokenAirdrop) {
+                throw new HttpException('MINT_TOKEN_AIRDROP configuration does not exist', HttpStatus.INTERNAL_SERVER_ERROR);
+            }
+
+            // Validate stake amount
+            const validation = await this.validateStakeAmount(wallet.wallet_solana_address, mintTokenAirdrop, stakeAmount);
+
+            return {
+                success: true,
+                message: validation.isValid ? 'Balance check passed' : 'Insufficient balance',
+                data: {
+                    currentBalance: validation.currentBalance,
+                    currentBalanceInTokens: validation.currentBalanceInTokens,
+                    maxPossibleStake: validation.maxPossibleStake,
+                    suggestions: validation.suggestions
+                }
+            };
+
+        } catch (error) {
+            this.logger.error(`Error checking wallet balance for stake: ${error.message}`);
+            throw error;
+        }
+    }
+
+    async suggestStakeAmount(walletId: number) {
+        try {
+            this.logger.log(`Getting stake suggestions for wallet ${walletId}`);
+
+            // Get wallet information
+            const wallet = await this.listWalletRepository.findOne({
+                where: { wallet_id: walletId }
+            });
+
+            if (!wallet) {
+                throw new BadRequestException('Wallet does not exist');
+            }
+
+            // Get token mint
+            const mintTokenAirdrop = this.configService.get<string>('MINT_TOKEN_AIRDROP');
+            if (!mintTokenAirdrop) {
+                throw new HttpException('MINT_TOKEN_AIRDROP configuration does not exist', HttpStatus.INTERNAL_SERVER_ERROR);
+            }
+
+            // Get token balance and info
+            const tokenBalance = await this.solanaService.getTokenBalance(wallet.wallet_solana_address, mintTokenAirdrop);
+            const tokenInfo = await this.getTokenInfo(mintTokenAirdrop);
+            const balanceInTokens = tokenBalance / Math.pow(10, tokenInfo.decimals);
+            const maxPossibleStake = Math.floor(balanceInTokens);
+
+            // Generate suggested amounts
+            const suggestedAmounts: number[] = [];
+            const suggestions: string[] = [];
+
+            if (maxPossibleStake >= 0.001) {
+                // Add common stake amounts
+                if (maxPossibleStake >= 0.001) suggestedAmounts.push(0.001);
+                if (maxPossibleStake >= 0.01) suggestedAmounts.push(0.01);
+                if (maxPossibleStake >= 0.1) suggestedAmounts.push(0.1);
+                if (maxPossibleStake >= 1) suggestedAmounts.push(1);
+                if (maxPossibleStake >= 10) suggestedAmounts.push(10);
+                if (maxPossibleStake >= 100) suggestedAmounts.push(100);
+                if (maxPossibleStake >= 1000) suggestedAmounts.push(1000);
+                if (maxPossibleStake >= 10000) suggestedAmounts.push(10000);
+                if (maxPossibleStake >= 100000) suggestedAmounts.push(100000);
+                if (maxPossibleStake >= 1000000) suggestedAmounts.push(1000000);
+                
+                // Add max possible stake
+                if (!suggestedAmounts.includes(maxPossibleStake)) {
+                    suggestedAmounts.push(maxPossibleStake);
+                }
+
+                suggestions.push(`You can stake up to ${maxPossibleStake} tokens`);
+                suggestions.push('Choose from suggested amounts above');
+            } else {
+                suggestions.push(`You need at least 0.001 token to stake. Current balance: ${balanceInTokens.toFixed(tokenInfo.decimals)} tokens`);
+                suggestions.push('Transfer more tokens to your wallet');
+            }
+
+            suggestions.push('Check your token balance on Solana explorer');
+
+            return {
+                success: true,
+                message: maxPossibleStake >= 0.001 ? 'Stake suggestions available' : 'Insufficient balance for staking',
+                data: {
+                    currentBalance: tokenBalance,
+                    currentBalanceInTokens: balanceInTokens,
+                    maxPossibleStake: maxPossibleStake,
+                    suggestedAmounts: suggestedAmounts,
+                    suggestions: suggestions
+                }
+            };
+
+        } catch (error) {
+            this.logger.error(`Error getting stake suggestions: ${error.message}`);
+            throw error;
+        }
     }
 
     private generateSlug(name: string, id: number): string {

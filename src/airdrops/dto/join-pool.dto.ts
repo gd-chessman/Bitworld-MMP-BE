@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsNumber, IsNotEmpty, Min } from 'class-validator';
+import { Type, Transform } from 'class-transformer';
 
 export class StakePoolDto {
     @ApiProperty({
@@ -8,6 +9,8 @@ export class StakePoolDto {
     })
     @IsNumber()
     @IsNotEmpty()
+    @Type(() => Number)
+    @Transform(({ value }) => parseInt(value))
     poolId: number;
 
     @ApiProperty({
@@ -17,5 +20,7 @@ export class StakePoolDto {
     })
     @IsNumber()
     @Min(1)
+    @Type(() => Number)
+    @Transform(({ value }) => parseInt(value))
     stakeAmount: number;
 } 
