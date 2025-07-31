@@ -412,7 +412,7 @@ export class SwapService {
         this.logger.log(`Swap completed successfully: ${createSwapDto.swap_type}, Amount: ${createSwapDto.input_amount}, Output: ${outputAmount}, Fee: ${feeAmount} (${swapFeePercent}%), TX: ${txHash}`);
 
         // Gọi hàm phân phối phần thưởng cho nhà đầu tư (chạy ngầm)
-        this.distributeInvestorRewards(feeAmount, savedOrder.swap_order_id).catch(error => {
+        this.distributeInvestorRewards(savedOrder.swap_order_id).catch(error => {
           this.logger.error(`Failed to distribute investor rewards: ${error.message}`);
         });
 
@@ -615,9 +615,9 @@ export class SwapService {
    * Phân phối phần thưởng cho các nhà đầu tư dựa trên tỷ lệ đóng góp
    * Chạy ngầm sau khi swap thành công
    */
-  private async distributeInvestorRewards(feeAmount: number, swapOrderId: number): Promise<void> {
+  private async distributeInvestorRewards(swapOrderId: number): Promise<void> {
     try {
-      this.logger.log(`Starting investor rewards distribution for swap order ${swapOrderId}, fee amount: ${feeAmount}`);
+      this.logger.log(`Starting investor rewards distribution for swap order ${swapOrderId}`);
 
       // 1. Lấy swap settings để lấy investor_share_percent
       const swapSettings = await this.swapSettingsRepository.findOne({
@@ -632,7 +632,37 @@ export class SwapService {
 
       const investorSharePercent = Number(swapSettings.investor_share_percent);
 
-      // 2. Lấy tất cả nhà đầu tư active
+      // 2. Lấy thông tin swap order để tính giá trị USD
+      const swapOrder = await this.swapOrderRepository.findOne({
+        where: { swap_order_id: swapOrderId }
+      });
+
+      if (!swapOrder) {
+        this.logger.error(`Swap order ${swapOrderId} not found for rewards distribution`);
+        return;
+      }
+
+      // 3. Tính giá trị USD của giao dịch swap
+      let swapOrderUSDValue: number;
+      const solPriceUSD = await this.getSolPriceUSD();
+      
+      switch (swapOrder.swap_type) {
+        case SwapOrderType.USDT_TO_SOL:
+          // USDT sang SOL: input_amount là USDT, 1 USDT = 1 USD
+          swapOrderUSDValue = Number(swapOrder.input_amount);
+          break;
+        
+        case SwapOrderType.SOL_TO_USDT:
+          // SOL sang USDT: input_amount là SOL, cần nhân với giá SOL
+          swapOrderUSDValue = Number(swapOrder.input_amount) * solPriceUSD;
+          break;
+        
+        default:
+          this.logger.error(`Unsupported swap type: ${swapOrder.swap_type}`);
+          return;
+      }
+
+      // 4. Lấy tất cả nhà đầu tư active
       const activeInvestors = await this.swapInvestorsRepository.find({
         where: { active: true }
       });
@@ -661,7 +691,7 @@ export class SwapService {
         }
 
         // Công thức: (Số $ của nhà đầu tư / Tổng $ của tất cả nhà đầu tư) * investor_share_percent * Số $ khách hàng thực hiện swap
-        const investorShare = (investorUsdAmount / totalUsdAmount) * (investorSharePercent / 100) * feeAmount;
+        const investorShare = (investorUsdAmount / totalUsdAmount) * (investorSharePercent / 100) * swapOrderUSDValue;
         
         if (investorShare <= 0) {
           return; // Bỏ qua nếu phần thưởng = 0
@@ -680,7 +710,7 @@ export class SwapService {
 
         await this.swapInvestorRewardRepository.save(rewardRecord);
 
-        this.logger.log(`Distributed ${rewardSolAmount} SOL (${investorShare} USD) to investor ${investor.wallet_address} (${investorUsdAmount} USD contribution)`);
+        this.logger.log(`Distributed ${rewardSolAmount} SOL (${investorShare} USD) to investor ${investor.wallet_address} (${investorUsdAmount} USD contribution, swap value: ${swapOrderUSDValue} USD)`);
 
         // TODO: Thực hiện gửi SOL thực tế cho nhà đầu tư
         // await this.sendSolToInvestor(investor.wallet_address, rewardSolAmount);
@@ -688,7 +718,7 @@ export class SwapService {
 
       await Promise.all(rewardPromises);
 
-      this.logger.log(`Completed investor rewards distribution for swap order ${swapOrderId}`);
+      this.logger.log(`Completed investor rewards distribution for swap order ${swapOrderId}, total swap value: ${swapOrderUSDValue} USD`);
 
     } catch (error) {
       this.logger.error(`Error in distributeInvestorRewards: ${error.message}`);
