@@ -695,4 +695,39 @@ export class SwapService {
       throw error;
     }
   }
+
+  /**
+   * Lấy lịch sử trả thưởng đã được thực hiện
+   */
+  async getRewardHistory(limit: number = 20, offset: number = 0): Promise<any> {
+    try {
+      // Lấy dữ liệu đơn giản từ bảng swap_investor_rewards
+      const rewards = await this.swapInvestorRewardRepository.find({
+        order: { created_at: 'DESC' },
+        take: limit,
+        skip: offset,
+      });
+
+      // Tính tổng số records
+      const totalRewards = await this.swapInvestorRewardRepository.count();
+
+      return {
+        success: true,
+        message: 'Reward history retrieved successfully',
+        data: {
+          rewards: rewards,
+          pagination: {
+            limit,
+            offset,
+            total: totalRewards,
+            has_more: (offset + limit) < totalRewards
+          }
+        }
+      };
+
+    } catch (error) {
+      this.logger.error(`Error getting reward history: ${error.message}`);
+      throw new BadRequestException(error.message);
+    }
+  }
 } 

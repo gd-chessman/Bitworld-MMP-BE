@@ -649,7 +649,7 @@ export class AdminService implements OnModuleInit {
   }
 
 
-  async getOrderHistory(page?: number, limit?: number, search?: string, status?: string) {
+  async getOrderHistory(page?: number, limit?: number, search?: string, status?: string, isBittworld?: string) {
     const qb = this.tradingOrderRepository.createQueryBuilder('o')
       .leftJoinAndSelect('o.wallet', 'wallet');
 
@@ -670,6 +670,12 @@ export class AdminService implements OnModuleInit {
       qb.andWhere('o.order_status = :status', { status: 'executed' });
     }
 
+    // Lọc theo isBittworld
+    if (isBittworld !== undefined && isBittworld !== null) {
+      const isBittworldBool = isBittworld === 'true' || isBittworld === '1';
+      qb.andWhere('wallet.isBittworld = :isBittworld', { isBittworld: isBittworldBool });
+    }
+
     // Phân trang
     const pageNum = Number(page) > 0 ? Number(page) : 1;
     const limitNum = Number(limit) > 0 ? Number(limit) : 50;
@@ -683,6 +689,7 @@ export class AdminService implements OnModuleInit {
       order_id: order.order_id,
       walletId: order.order_wallet_id,
       solAddress: order.wallet?.wallet_solana_address || null,
+      isBittworld: order.wallet?.isBittworld || false,
       order_trade_type: order.order_trade_type,
       order_token_address: order.order_token_address,
       order_token_name: order.order_token_name,

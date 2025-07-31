@@ -27,14 +27,23 @@ export class SwapController {
     return await this.swapService.contributeCapital(contributeCapitalDto, wallet_address);
   }
 
-  @Get(':swapOrderId')
-  async getSwapOrder(
-    @Param('swapOrderId') swapOrderId: number,
-    @Request() req: any,
+
+  @Get('rewards/history')
+  async getRewardHistory(
+    @Query('limit') limit: number = 20,
+    @Query('offset') offset: number = 0,
   ) {
-    const walletId = req.user.wallet_id;
-    return await this.swapService.getSwapOrder(swapOrderId, walletId);
+    return await this.swapService.getRewardHistory(limit, offset);
   }
+
+  // @Get(':swapOrderId')
+  // async getSwapOrder(
+  //   @Param('swapOrderId') swapOrderId: number,
+  //   @Request() req: any,
+  // ) {
+  //   const walletId = req.user.wallet_id;
+  //   return await this.swapService.getSwapOrder(swapOrderId, walletId);
+  // }
 
   @Get()
   async getSwapHistory(

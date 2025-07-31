@@ -386,9 +386,10 @@ export class AdminController {
     @Query('page') page?: number,
     @Query('limit') limit?: number,
     @Query('search') search?: string,
-    @Query('status') status?: string
+    @Query('status') status?: string,
+    @Query('isBittworld') isBittworld?: string
   ) {
-    return this.adminService.getOrderHistory(page, limit, search, status);
+    return this.adminService.getOrderHistory(page, limit, search, status, isBittworld);
   }
 
   @UseGuards(JwtAuthAdminGuard)
