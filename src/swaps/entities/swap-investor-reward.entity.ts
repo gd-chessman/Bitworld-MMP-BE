@@ -3,10 +3,17 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  UpdateDateColumn,
   ManyToOne,
   JoinColumn,
 } from 'typeorm';
 import { SwapOrder } from './swap-order.entity';
+
+export enum RewardStatus {
+  PENDING = 'pending',
+  PAID = 'paid',
+  FAILED = 'failed',
+}
 
 @Entity('swap_investor_rewards')
 export class SwapInvestorReward {
@@ -36,8 +43,34 @@ export class SwapInvestorReward {
   })
   investor_id: number;
 
+  @Column({ 
+    name: 'status', 
+    type: 'enum', 
+    enum: RewardStatus,
+    default: RewardStatus.PENDING 
+  })
+  status: RewardStatus;
+
+  @Column({ 
+    name: 'transaction_hash', 
+    type: 'varchar', 
+    length: 255,
+    nullable: true 
+  })
+  transaction_hash: string;
+
+  @Column({ 
+    name: 'error_message', 
+    type: 'text',
+    nullable: true 
+  })
+  error_message: string;
+
   @CreateDateColumn({ name: 'created_at' })
   created_at: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updated_at: Date;
 
   // Foreign key reference to SwapOrder
   @ManyToOne(() => SwapOrder, swapOrder => swapOrder.investorRewards)
