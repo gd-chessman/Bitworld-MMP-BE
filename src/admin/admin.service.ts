@@ -24,6 +24,11 @@ import { PublicKey } from '@solana/web3.js';
 import { SwapSettings } from '../swaps/entities/swap-setting.entity';
 import { SwapInvestorReward } from '../swaps/entities/swap-investor-reward.entity';
 import { SwapSettingDto, UpdateSwapSettingDto } from './dto/swap-setting.dto';
+import { AirdropListPool, AirdropPoolStatus } from '../airdrops/entities/airdrop-list-pool.entity';
+import { AirdropPoolJoin, AirdropPoolJoinStatus } from '../airdrops/entities/airdrop-pool-join.entity';
+import { AirdropPoolResponseDto, AirdropPoolListResponseDto } from './dto/airdrop-pool-response.dto';
+import { AirdropPoolStatsResponseDto } from './dto/airdrop-pool-stats-response.dto';
+import { AirdropPoolDetailResponseDto, AirdropPoolTransactionDto } from './dto/airdrop-pool-detail-response.dto';
 
 @Injectable()
 export class AdminService implements OnModuleInit {
@@ -52,6 +57,10 @@ export class AdminService implements OnModuleInit {
     private tradingOrderRepository: Repository<TradingOrder>,
     @InjectRepository(ReferentLevelReward)
     private referentLevelRewardRepository: Repository<ReferentLevelReward>,
+    @InjectRepository(AirdropListPool)
+    private airdropListPoolRepository: Repository<AirdropListPool>,
+    @InjectRepository(AirdropPoolJoin)
+    private airdropPoolJoinRepository: Repository<AirdropPoolJoin>,
     private dataSource: DataSource,
   ) {
     // Initialize swap settings on app start
@@ -2455,5 +2464,213 @@ export class AdminService implements OnModuleInit {
         totalPages: Math.ceil(total / limit)
       }
     };
+  }
+
+  async getAirdropPools(
+    page: number = 1,
+    limit: number = 20,
+    search?: string,
+    status?: string,
+    originator_id?: number
+  ): Promise<AirdropPoolListResponseDto> {
+    const queryBuilder = this.airdropListPoolRepository
+      .createQueryBuilder('pool')
+      .leftJoinAndSelect('pool.originator', 'originator');
+
+    // Search by pool name, slug, or description
+    if (search) {
+      queryBuilder.andWhere(
+        '(pool.alp_name ILIKE :search OR pool.alp_slug ILIKE :search OR pool.alp_describe ILIKE :search)',
+        { search: `%${search}%` }
+      );
+    }
+
+    // Filter by status
+    if (status) {
+      queryBuilder.andWhere('pool.apl_status = :status', { status });
+    }
+
+    // Filter by originator
+    if (originator_id) {
+      queryBuilder.andWhere('pool.alp_originator = :originator_id', { originator_id });
+    }
+
+    const total = await queryBuilder.getCount();
+    const totalPages = Math.ceil(total / limit);
+
+    const pools = await queryBuilder
+      .orderBy('pool.apl_creation_date', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getMany();
+
+    // Transform data to match DTO
+    const transformedPools: AirdropPoolResponseDto[] = pools.map(pool => ({
+      alp_id: pool.alp_id,
+      alp_originator: pool.alp_originator,
+      alp_name: pool.alp_name,
+      alp_slug: pool.alp_slug,
+      alp_describe: pool.alp_describe,
+      alp_logo: pool.alp_logo,
+      alp_member_num: pool.alp_member_num,
+      apl_volume: pool.apl_volume,
+      apl_creation_date: pool.apl_creation_date,
+      apl_end_date: pool.apl_end_date,
+      apl_status: pool.apl_status,
+      apl_hash: pool.apl_hash,
+      originator: pool.originator ? {
+        wallet_id: pool.originator.wallet_id,
+        solana_address: pool.originator.wallet_solana_address,
+        nick_name: pool.originator.wallet_nick_name
+      } : undefined
+    }));
+
+    return {
+      data: transformedPools,
+      total,
+      page,
+      limit,
+      totalPages
+    };
+  }
+
+  async getAirdropPoolsStats(): Promise<AirdropPoolStatsResponseDto> {
+    // Get total pools count
+    const totalPools = await this.airdropListPoolRepository.count();
+    
+    // Get active pools count
+    const activePools = await this.airdropListPoolRepository.count({
+      where: { apl_status: AirdropPoolStatus.ACTIVE }
+    });
+
+    // Get total members and volume across all pools
+    const totalStats = await this.airdropListPoolRepository
+      .createQueryBuilder('pool')
+      .select('SUM(pool.alp_member_num)', 'totalMembers')
+      .addSelect('SUM(pool.apl_volume)', 'totalVolume')
+      .getRawOne();
+
+    const totalMembers = parseInt(totalStats?.totalMembers || '0');
+    const totalVolume = parseFloat(totalStats?.totalVolume || '0');
+
+    // Currently running pools (same as active pools)
+    const currentlyRunning = activePools;
+
+    return {
+      totalPools,
+      activePools,
+      totalMembers,
+      totalVolume,
+      currentlyRunning
+    };
+  }
+
+  async getAirdropPoolDetailByIdOrSlug(idOrSlug: string): Promise<AirdropPoolDetailResponseDto> {
+    // Check if idOrSlug is numeric
+    const isNumeric = !isNaN(Number(idOrSlug));
+    
+    let pool;
+    if (isNumeric) {
+      // Find by ID
+      pool = await this.airdropListPoolRepository.findOne({
+        where: { alp_id: parseInt(idOrSlug) }
+      });
+    } else {
+      // Find by slug
+      pool = await this.airdropListPoolRepository.findOne({
+        where: { alp_slug: idOrSlug }
+      });
+    }
+
+    if (!pool) {
+      throw new NotFoundException(`Airdrop pool with ID/Slug ${idOrSlug} not found`);
+    }
+
+    // Get pool creator wallet information
+    const creatorWallet = await this.listWalletRepository.findOne({
+      where: { wallet_id: pool.alp_originator }
+    });
+
+    // Get all transactions in the pool
+    const transactions = await this.getAirdropPoolTransactions(pool.alp_id);
+
+    return {
+      poolId: pool.alp_id,
+      name: pool.alp_name,
+      slug: pool.alp_slug,
+      logo: pool.alp_logo,
+      describe: pool.alp_describe,
+      memberCount: pool.alp_member_num,
+      totalVolume: pool.apl_volume,
+      creationDate: pool.apl_creation_date,
+      endDate: pool.apl_end_date,
+      status: pool.apl_status,
+      transactionHash: pool.apl_hash,
+      creatorAddress: creatorWallet?.wallet_solana_address || '',
+      creatorBittworldUid: creatorWallet?.bittworld_uid || null,
+      transactions: transactions
+    };
+  }
+
+  private async getAirdropPoolTransactions(poolId: number): Promise<AirdropPoolTransactionDto[]> {
+    // Get all stake records of the pool with member information
+    const allStakes = await this.airdropPoolJoinRepository.find({
+      where: {
+        apj_pool_id: poolId,
+        apj_status: AirdropPoolJoinStatus.ACTIVE
+      },
+      relations: ['member']
+    });
+
+    // Get creator information
+    const pool = await this.airdropListPoolRepository.findOne({
+      where: { alp_id: poolId },
+      relations: ['originator']
+    });
+
+    if (!pool) {
+      throw new NotFoundException(`Pool with ID ${poolId} not found`);
+    }
+
+    const transactions: AirdropPoolTransactionDto[] = [];
+
+    // Add creator's initial transaction (if pool is active)
+    if (pool.apl_status === AirdropPoolStatus.ACTIVE && pool.originator) {
+      transactions.push({
+        transactionId: 0, // Special ID for creator's initial transaction
+        memberId: pool.alp_originator,
+        solanaAddress: pool.originator.wallet_solana_address,
+        bittworldUid: pool.originator.bittworld_uid || null,
+        nickname: pool.originator.wallet_nick_name || 'Creator',
+        isCreator: true,
+        stakeAmount: pool.apl_volume,
+        transactionDate: pool.apl_creation_date,
+        status: pool.apl_status,
+        transactionHash: pool.apl_hash
+      });
+    }
+
+    // Add all member transactions
+    for (const stake of allStakes) {
+      if (stake.member) {
+        transactions.push({
+          transactionId: stake.apj_id,
+          memberId: stake.apj_member,
+          solanaAddress: stake.member.wallet_solana_address,
+          bittworldUid: stake.member.bittworld_uid || null,
+          nickname: stake.member.wallet_nick_name || 'Unknown',
+          isCreator: false,
+          stakeAmount: stake.apj_volume,
+          transactionDate: stake.apj_stake_date,
+          status: stake.apj_status,
+          transactionHash: stake.apj_hash
+        });
+      }
+    }
+
+    // Sort by transaction date (newest first)
+    transactions.sort((a, b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime());
+
+    return transactions;
   }
 }

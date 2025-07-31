@@ -24,6 +24,8 @@ import { TradingOrder } from '../trade/entities/trading-order.entity';
 import { SwapInvestors } from '../swaps/entities/swap-investor.entity';
 import { SwapSettings } from '../swaps/entities/swap-setting.entity';
 import { SwapInvestorReward } from '../swaps/entities/swap-investor-reward.entity';
+import { AirdropListPool } from '../airdrops/entities/airdrop-list-pool.entity';
+import { AirdropPoolJoin } from '../airdrops/entities/airdrop-pool-join.entity';
 
 @Module({
   imports: [
@@ -40,6 +42,8 @@ import { SwapInvestorReward } from '../swaps/entities/swap-investor-reward.entit
       SwapInvestors,
       SwapSettings,
       SwapInvestorReward,
+      AirdropListPool,
+      AirdropPoolJoin,
     ]),
     PassportModule.register({ defaultStrategy: 'admin-jwt' }),
     JwtModule.register({

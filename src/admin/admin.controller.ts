@@ -1,5 +1,5 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, Query, UseGuards, Request, Res, HttpCode, UseInterceptors, UploadedFile } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { CategoryResponseDto } from './dto/category-response.dto';
 import { CategoryPrioritize, CategoryStatus } from '../solana/entities/solana-list-categories-token.entity';
@@ -22,6 +22,9 @@ import { ReferentLevelReward } from '../referral/entities/referent-level-rewards
 import { CreateUserDto } from './dto/create-user.dto';
 import { CreateInvestorDto } from './dto/create-investor.dto';
 import { SwapSettingDto, UpdateSwapSettingDto } from './dto/swap-setting.dto';
+import { AirdropPoolListResponseDto, AirdropPoolResponseDto } from './dto/airdrop-pool-response.dto';
+import { AirdropPoolStatsResponseDto } from './dto/airdrop-pool-stats-response.dto';
+import { AirdropPoolDetailResponseDto } from './dto/airdrop-pool-detail-response.dto';
 import { ConflictException, HttpException, HttpStatus, UnauthorizedException } from '@nestjs/common';
 
 @ApiTags('admin')
@@ -575,4 +578,40 @@ export class AdminController {
     return await this.adminService.getSwapInvestorRewards(page, limit, search, investor_id, swap_order_id);
   }
 
+  @UseGuards(JwtAuthAdminGuard)
+  @Get('airdrop-pools')
+  @ApiOperation({ summary: 'Get airdrop pools list' })
+  @ApiResponse({ status: 200, type: AirdropPoolListResponseDto })
+  async getAirdropPools(
+    @Query('page', new ParseIntPipe({ optional: true })) page: number = 1,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 20,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+    @Query('originator_id', new ParseIntPipe({ optional: true })) originator_id?: number
+  ): Promise<AirdropPoolListResponseDto> {
+    return this.adminService.getAirdropPools(page, limit, search, status, originator_id);
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Get('airdrop-pools/stats')
+  @ApiOperation({ summary: 'Get airdrop pools statistics' })
+  @ApiResponse({ status: 200, type: AirdropPoolStatsResponseDto })
+  async getAirdropPoolsStats(): Promise<AirdropPoolStatsResponseDto> {
+    return this.adminService.getAirdropPoolsStats();
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Get('airdrop-pools/detail/:idOrSlug')
+  @ApiOperation({ summary: 'Get airdrop pool detail with all transactions' })
+  @ApiParam({
+    name: 'idOrSlug',
+    description: 'ID or slug of the pool (e.g., 1 or "my-airdrop-pool-1")',
+    example: 'my-airdrop-pool-1'
+  })
+  @ApiResponse({ status: 200, type: AirdropPoolDetailResponseDto })
+  async getAirdropPoolDetail(
+    @Param('idOrSlug') idOrSlug: string
+  ): Promise<AirdropPoolDetailResponseDto> {
+    return this.adminService.getAirdropPoolDetailByIdOrSlug(idOrSlug);
+  }
 }
