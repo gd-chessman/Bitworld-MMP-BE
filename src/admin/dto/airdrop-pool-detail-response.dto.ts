@@ -1,6 +1,35 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { AirdropPoolStatus } from '../../airdrops/entities/airdrop-list-pool.entity';
 
+export class AirdropPoolMemberDto {
+  @ApiProperty({ description: 'Member ID' })
+  memberId: number;
+
+  @ApiProperty({ description: 'Solana address' })
+  solanaAddress: string;
+
+  @ApiProperty({ description: 'Bittworld UID', required: false })
+  bittworldUid?: string | null;
+
+  @ApiProperty({ description: 'Nickname' })
+  nickname: string;
+
+  @ApiProperty({ description: 'Is creator' })
+  isCreator: boolean;
+
+  @ApiProperty({ description: 'Join date' })
+  joinDate: Date;
+
+  @ApiProperty({ description: 'Total staked amount' })
+  totalStaked: number;
+
+  @ApiProperty({ description: 'Stake count' })
+  stakeCount: number;
+
+  @ApiProperty({ description: 'Status' })
+  status: string;
+}
+
 export class AirdropPoolTransactionDto {
   @ApiProperty({ description: 'Transaction ID' })
   transactionId: number;
@@ -72,6 +101,9 @@ export class AirdropPoolDetailResponseDto {
 
   @ApiProperty({ description: 'Creator Bittworld UID', required: false })
   creatorBittworldUid?: string | null;
+
+  @ApiProperty({ description: 'List of members', type: [AirdropPoolMemberDto] })
+  members: AirdropPoolMemberDto[];
 
   @ApiProperty({ description: 'List of transactions', type: [AirdropPoolTransactionDto] })
   transactions: AirdropPoolTransactionDto[];

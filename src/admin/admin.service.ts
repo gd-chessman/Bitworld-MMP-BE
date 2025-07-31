@@ -28,7 +28,7 @@ import { AirdropListPool, AirdropPoolStatus } from '../airdrops/entities/airdrop
 import { AirdropPoolJoin, AirdropPoolJoinStatus } from '../airdrops/entities/airdrop-pool-join.entity';
 import { AirdropPoolResponseDto, AirdropPoolListResponseDto } from './dto/airdrop-pool-response.dto';
 import { AirdropPoolStatsResponseDto } from './dto/airdrop-pool-stats-response.dto';
-import { AirdropPoolDetailResponseDto, AirdropPoolTransactionDto } from './dto/airdrop-pool-detail-response.dto';
+import { AirdropPoolDetailResponseDto, AirdropPoolTransactionDto, AirdropPoolMemberDto } from './dto/airdrop-pool-detail-response.dto';
 
 @Injectable()
 export class AdminService implements OnModuleInit {
@@ -2513,7 +2513,7 @@ export class AdminService implements OnModuleInit {
       alp_describe: pool.alp_describe,
       alp_logo: pool.alp_logo,
       alp_member_num: pool.alp_member_num,
-      apl_volume: pool.apl_volume,
+      apl_volume: Number(pool.apl_volume),
       apl_creation_date: pool.apl_creation_date,
       apl_end_date: pool.apl_end_date,
       apl_status: pool.apl_status,
@@ -2594,6 +2594,9 @@ export class AdminService implements OnModuleInit {
     // Get all transactions in the pool
     const transactions = await this.getAirdropPoolTransactions(pool.alp_id);
 
+    // Get all members in the pool
+    const members = await this.getAirdropPoolMembers(pool.alp_id);
+
     return {
       poolId: pool.alp_id,
       name: pool.alp_name,
@@ -2601,13 +2604,14 @@ export class AdminService implements OnModuleInit {
       logo: pool.alp_logo,
       describe: pool.alp_describe,
       memberCount: pool.alp_member_num,
-      totalVolume: pool.apl_volume,
+      totalVolume: Number(pool.apl_volume),
       creationDate: pool.apl_creation_date,
       endDate: pool.apl_end_date,
       status: pool.apl_status,
       transactionHash: pool.apl_hash,
       creatorAddress: creatorWallet?.wallet_solana_address || '',
       creatorBittworldUid: creatorWallet?.bittworld_uid || null,
+      members: members,
       transactions: transactions
     };
   }
@@ -2643,7 +2647,7 @@ export class AdminService implements OnModuleInit {
         bittworldUid: pool.originator.bittworld_uid || null,
         nickname: pool.originator.wallet_nick_name || 'Creator',
         isCreator: true,
-        stakeAmount: pool.apl_volume,
+        stakeAmount: Number(pool.apl_volume),
         transactionDate: pool.apl_creation_date,
         status: pool.apl_status,
         transactionHash: pool.apl_hash
@@ -2660,7 +2664,7 @@ export class AdminService implements OnModuleInit {
           bittworldUid: stake.member.bittworld_uid || null,
           nickname: stake.member.wallet_nick_name || 'Unknown',
           isCreator: false,
-          stakeAmount: stake.apj_volume,
+          stakeAmount: Number(stake.apj_volume),
           transactionDate: stake.apj_stake_date,
           status: stake.apj_status,
           transactionHash: stake.apj_hash
@@ -2672,5 +2676,100 @@ export class AdminService implements OnModuleInit {
     transactions.sort((a, b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime());
 
     return transactions;
+  }
+
+  private async getAirdropPoolMembers(poolId: number): Promise<AirdropPoolMemberDto[]> {
+    // Get all stake records of the pool with member information
+    const allStakes = await this.airdropPoolJoinRepository.find({
+      where: {
+        apj_pool_id: poolId,
+        apj_status: AirdropPoolJoinStatus.ACTIVE
+      },
+      relations: ['member']
+    });
+
+    // Get creator information
+    const pool = await this.airdropListPoolRepository.findOne({
+      where: { alp_id: poolId },
+      relations: ['originator']
+    });
+
+    if (!pool) {
+      throw new NotFoundException(`Pool with ID ${poolId} not found`);
+    }
+
+    // Create map to group by member (solanaAddress)
+    const memberMap = new Map<string, {
+      memberId: number;
+      solanaAddress: string;
+      bittworldUid: string | null;
+      nickname: string;
+      isCreator: boolean;
+      joinDate: Date;
+      totalStaked: number;
+      stakeCount: number;
+      status: string;
+    }>();
+
+    // Add creator to map
+    if (pool.originator) {
+      memberMap.set(pool.originator.wallet_solana_address, {
+        memberId: pool.alp_originator,
+        solanaAddress: pool.originator.wallet_solana_address,
+        bittworldUid: pool.originator.bittworld_uid || null,
+        nickname: pool.originator.wallet_nick_name || 'Creator',
+        isCreator: true,
+        joinDate: pool.apl_creation_date,
+        totalStaked: Number(pool.apl_volume), // Initial volume
+        stakeCount: 0, // Will be updated later
+        status: 'active'
+      });
+    }
+
+    // Process stake records
+    for (const stake of allStakes) {
+      if (stake.member) {
+        const solanaAddress = stake.member.wallet_solana_address;
+        const existingMember = memberMap.get(solanaAddress);
+
+        if (existingMember) {
+          // Update existing member information
+          existingMember.totalStaked += Number(stake.apj_volume);
+          existingMember.stakeCount += 1;
+          // Update join date if this stake is earlier
+          if (stake.apj_stake_date < existingMember.joinDate) {
+            existingMember.joinDate = stake.apj_stake_date;
+          }
+        } else {
+          // Create new member
+          memberMap.set(solanaAddress, {
+            memberId: stake.apj_member,
+            solanaAddress: solanaAddress,
+            bittworldUid: stake.member.bittworld_uid || null,
+            nickname: stake.member.wallet_nick_name || 'Unknown',
+            isCreator: false,
+            joinDate: stake.apj_stake_date,
+            totalStaked: Number(stake.apj_volume),
+            stakeCount: 1,
+            status: stake.apj_status
+          });
+        }
+      }
+    }
+
+    // Convert map to array
+    let members = Array.from(memberMap.values());
+
+    // Sort by total staked amount (descending) and creator first
+    members.sort((a, b) => {
+      // Creator always at the top
+      if (a.isCreator && !b.isCreator) return -1;
+      if (!a.isCreator && b.isCreator) return 1;
+
+      // Then sort by total staked amount (descending)
+      return b.totalStaked - a.totalStaked;
+    });
+
+    return members;
   }
 }
