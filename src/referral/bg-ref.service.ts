@@ -1007,7 +1007,12 @@ export class BgRefService {
     // Lấy thông tin wallet hiện tại
     const currentWallet = await this.listWalletRepository.findOne({
       where: { wallet_id: walletId },
-      select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address']
+      select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address', 'isBittworld', 'bittworld_uid']
+    });
+
+    // Lấy thông tin bg_alias từ node
+    const bgNode = await this.bgAffiliateNodeRepository.findOne({
+      where: { ban_wallet_id: walletId, ban_tree_id: bgAffiliateInfo.treeId }
     });
 
     // Lấy tổng thu nhập (bao gồm cả đã rút)
@@ -1024,7 +1029,10 @@ export class BgRefService {
         walletId: currentWallet.wallet_id,
         solanaAddress: currentWallet.wallet_solana_address,
         nickName: currentWallet.wallet_nick_name,
-        ethAddress: currentWallet.wallet_eth_address
+        ethAddress: currentWallet.wallet_eth_address,
+        isBittworld: currentWallet.isBittworld,
+        bittworldUid: currentWallet.bittworld_uid,
+        bgAlias: bgNode?.bg_alias || null
       } : null,
       treeInfo: {
         treeId: tree.bat_id,
