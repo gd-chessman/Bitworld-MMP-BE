@@ -501,10 +501,16 @@ export class SwapService {
         throw new BadRequestException('Amount must be greater than 0');
       }
 
-      // 2. Validate wallet address format (basic Solana address validation)
-      const walletAddressRegex = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-      if (!walletAddressRegex.test(wallet_address)) {
-        throw new BadRequestException('Invalid Solana wallet address format');
+      // 2. Validate wallet address exists on Solana blockchain
+      try {
+        const publicKey = new PublicKey(wallet_address);
+        const accountInfo = await this.connection.getAccountInfo(publicKey);
+        
+        if (!accountInfo) {
+          throw new BadRequestException('Invalid wallet address');
+        }
+      } catch (error) {
+        throw new BadRequestException('Invalid wallet address');
       }
 
       // 3. Lấy giá SOL hiện tại để tính USD
