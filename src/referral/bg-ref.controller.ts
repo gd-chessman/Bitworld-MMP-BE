@@ -1,9 +1,10 @@
-import { Controller, Post, Get, Put, Body, Param, Query, UseGuards, Request, Res, HttpCode, HttpStatus, UnauthorizedException, Req } from '@nestjs/common';
+import { Controller, Post, Get, Put, Body, Param, Query, UseGuards, Request, Res, HttpCode, HttpStatus, UnauthorizedException, Req, BadRequestException } from '@nestjs/common';
 import { BgRefService } from './bg-ref.service';
 import { BgRefWithdrawService } from './services/bg-ref-withdraw.service';
 import { JwtBgAuthGuard } from './guards/jwt-bg-auth.guard';
 import { BgAuthService } from './bg-auth.service';
 import { Response } from 'express';
+import { UpdateBgAliasDto } from './dto/update-bg-alias.dto';
 
 import { RequestWithBgUser } from './guards/jwt-bg-auth.guard';
 
@@ -20,13 +21,13 @@ export class BgRefController {
   /**
    * Connect Telegram cho BG affiliate
    */
-  @Post('connect-telegram')
-  async connectTelegram(
-    @Body() body: { id: string; code: string },
-    @Res({ passthrough: true }) response: Response
-  ) {
-    return await this.bgAuthService.connectTelegram(body, response);
-  }
+  // @Post('connect-telegram')
+  // async connectTelegram(
+  //   @Body() body: { id: string; code: string },
+  //   @Res({ passthrough: true }) response: Response
+  // ) {
+  //   return await this.bgAuthService.connectTelegram(body, response);
+  // }
 
   /**
    * Login Email cho BG affiliate
@@ -90,8 +91,25 @@ export class BgRefController {
     );
   }
 
-
-
+  /**
+   * Update bg_alias of node (only upline has permission)
+   */
+  @UseGuards(JwtBgAuthGuard)
+  @Put('nodes/alias')
+  async updateBgAlias(
+    @Request() req: RequestWithUser,
+    @Body() body: UpdateBgAliasDto
+  ) {
+    const fromWalletId = req.user?.wallet_id;
+      if (!fromWalletId) {
+        throw new BadRequestException('Cannot find wallet info in token');
+    }
+    return await this.bgRefService.updateBgAlias(
+      fromWalletId,
+      body.toWalletId,
+      body.newAlias
+    );
+  }
 
 
   /**

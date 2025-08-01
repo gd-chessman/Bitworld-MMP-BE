@@ -1518,4 +1518,130 @@ export class BgRefService {
       }
     };
   }
+
+  /**
+   * Update bg_alias for node in affiliate tree
+   * Only upline can update alias for downline
+   */
+  async updateBgAlias(
+    fromWalletId: number,
+    toWalletId: number,
+    newAlias: string
+  ): Promise<{
+    success: boolean;
+    message: string;
+    fromWallet: any;
+    toWallet: any;
+    oldAlias: string | null;
+    newAlias: string;
+  }> {
+    // Check if the wallet performing the change is in the BG affiliate system
+    const fromNode = await this.bgAffiliateNodeRepository.findOne({
+      where: { ban_wallet_id: fromWalletId }
+    });
+
+    if (!fromNode) {
+      throw new BadRequestException('Wallet performing the change is not in the BG affiliate system');
+    }
+
+    // Check if the wallet being changed is in the BG affiliate system
+    const toNode = await this.bgAffiliateNodeRepository.findOne({
+      where: { ban_wallet_id: toWalletId }
+    });
+
+    if (!toNode) {
+      throw new BadRequestException('Wallet being changed is not in the BG affiliate system');
+    }
+
+    // Check if both wallets belong to the same affiliate tree
+    if (fromNode.ban_tree_id !== toNode.ban_tree_id) {
+      throw new BadRequestException('Both wallets must belong to the same affiliate tree');
+    }
+
+    // Check if the wallet performing the change is upline of the wallet being changed
+    const isUpline = await this.isWalletInUpline(fromWalletId, toWalletId);
+    if (!isUpline) {
+      throw new BadRequestException('Only upline can update alias for downline');
+    }
+
+    // Save old alias
+    const oldAlias = toNode.bg_alias;
+
+    // Update new alias
+    toNode.bg_alias = newAlias;
+    await this.bgAffiliateNodeRepository.save(toNode);
+
+    // Get wallet information
+    const fromWallet = await this.listWalletRepository.findOne({
+      where: { wallet_id: fromWalletId },
+      select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name']
+    });
+
+    const toWallet = await this.listWalletRepository.findOne({
+      where: { wallet_id: toWalletId },
+      select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name']
+    });
+
+    return {
+      success: true,
+      message: 'BG alias updated successfully',
+      fromWallet: fromWallet ? {
+        walletId: fromWallet.wallet_id,
+        solanaAddress: fromWallet.wallet_solana_address,
+        nickName: fromWallet.wallet_nick_name
+      } : null,
+      toWallet: toWallet ? {
+        walletId: toWallet.wallet_id,
+        solanaAddress: toWallet.wallet_solana_address,
+        nickName: toWallet.wallet_nick_name
+      } : null,
+      oldAlias,
+      newAlias
+    };
+  }
+
+  /**
+   * Check if a wallet is upline of another wallet
+   */
+  private async isWalletInUpline(uplineWalletId: number, downlineWalletId: number): Promise<boolean> {
+    // If it's the same wallet, it's not upline
+    if (uplineWalletId === downlineWalletId) {
+      return false;
+    }
+
+    // Get downline wallet node information
+    const downlineNode = await this.bgAffiliateNodeRepository.findOne({
+      where: { ban_wallet_id: downlineWalletId }
+    });
+
+    if (!downlineNode) {
+      return false;
+    }
+
+    // Check if upline wallet is direct parent
+    if (downlineNode.ban_parent_wallet_id === uplineWalletId) {
+      return true;
+    }
+
+    // Check if upline wallet is ancestor (higher upline)
+    let currentParentId = downlineNode.ban_parent_wallet_id;
+    
+    while (currentParentId !== null) {
+      const parentNode = await this.bgAffiliateNodeRepository.findOne({
+        where: { ban_wallet_id: currentParentId }
+      });
+
+      if (!parentNode) {
+        break;
+      }
+
+      if (parentNode.ban_wallet_id === uplineWalletId) {
+        return true;
+      }
+
+      currentParentId = parentNode.ban_parent_wallet_id;
+    }
+
+    return false;
+  }
 } 
