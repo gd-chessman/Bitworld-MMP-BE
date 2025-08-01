@@ -6,7 +6,7 @@ import { Connection, PublicKey, Transaction, sendAndConfirmTransaction, Keypair,
 import { SwapOrder, SwapOrderType, SwapOrderStatus } from './entities/swap-order.entity';
 import { SwapSettings } from './entities/swap-setting.entity';
 import { SwapInvestors } from './entities/swap-investor.entity';
-import { SwapInvestorReward } from './entities/swap-investor-reward.entity';
+import { SwapInvestorReward, RewardStatus } from './entities/swap-investor-reward.entity';
 import { ListWallet } from '../telegram-wallets/entities/list-wallet.entity';
 import { CreateSwapDto } from './dto/create-swap.dto';
 import { ContributeCapitalDto, ContributionType } from './dto/contribute-capital.dto';
@@ -701,19 +701,42 @@ export class SwapService {
         const solPriceUSD = await this.getSolPriceUSD();
         const rewardSolAmount = investorShare / solPriceUSD;
 
-        // Tạo record phần thưởng
+        // Tạo record phần thưởng với status PENDING
         const rewardRecord = this.swapInvestorRewardRepository.create({
           swap_order_id: swapOrderId,
           investor_id: investor.swap_investor_id,
-          reward_sol_amount: rewardSolAmount
+          reward_sol_amount: rewardSolAmount,
+          status: RewardStatus.PENDING
         });
 
         await this.swapInvestorRewardRepository.save(rewardRecord);
 
-        this.logger.log(`Distributed ${rewardSolAmount} SOL (${investorShare} USD) to investor ${investor.wallet_address} (${investorUsdAmount} USD contribution, swap value: ${swapOrderUSDValue} USD)`);
+        this.logger.log(`Created reward record: ${rewardSolAmount} SOL (${investorShare} USD) for investor ${investor.wallet_address} (${investorUsdAmount} USD contribution, swap value: ${swapOrderUSDValue} USD)`);
 
-        // TODO: Thực hiện gửi SOL thực tế cho nhà đầu tư
-        // await this.sendSolToInvestor(investor.wallet_address, rewardSolAmount);
+        // Kiểm tra balance của pool trước khi gửi SOL
+        try {
+          const poolBalance = await this.connection.getBalance(this.swapAuthorityKeypair.publicKey);
+          const requiredLamports = Math.floor(rewardSolAmount * 1e9); // Convert SOL to lamports
+          
+          if (poolBalance >= requiredLamports) {
+            // Đủ balance, thực hiện gửi SOL
+            await this.sendSolToInvestor(investor.wallet_address, rewardSolAmount, rewardRecord.swap_investor_reward_id);
+          } else {
+            // Không đủ balance, cập nhật status thành WAIT_BALANCE
+            rewardRecord.status = RewardStatus.WAIT_BALANCE;
+            rewardRecord.error_message = `Insufficient pool balance. Required: ${rewardSolAmount} SOL, Available: ${poolBalance / 1e9} SOL`;
+            await this.swapInvestorRewardRepository.save(rewardRecord);
+            
+            this.logger.warn(`Insufficient pool balance for investor ${investor.wallet_address}. Required: ${rewardSolAmount} SOL, Available: ${poolBalance / 1e9} SOL`);
+          }
+        } catch (error) {
+          // Lỗi khi kiểm tra balance, cập nhật status thành FAILED
+          rewardRecord.status = RewardStatus.FAILED;
+          rewardRecord.error_message = `Failed to check balance: ${error.message}`;
+          await this.swapInvestorRewardRepository.save(rewardRecord);
+          
+          this.logger.error(`Failed to check balance for investor ${investor.wallet_address}: ${error.message}`);
+        }
       });
 
       await Promise.all(rewardPromises);
@@ -758,6 +781,70 @@ export class SwapService {
     } catch (error) {
       this.logger.error(`Error getting reward history: ${error.message}`);
       throw new BadRequestException(error.message);
+    }
+  }
+
+  /**
+   * Gửi SOL cho nhà đầu tư
+   */
+  private async sendSolToInvestor(walletAddress: string, solAmount: number, rewardId: number): Promise<void> {
+    try {
+      // Tạo transaction để gửi SOL
+      const transaction = new Transaction();
+      
+      // Gửi SOL từ pool đến nhà đầu tư
+      const lamports = Math.floor(solAmount * 1e9);
+      transaction.add(
+        SystemProgram.transfer({
+          fromPubkey: this.swapAuthorityKeypair.publicKey,
+          toPubkey: new PublicKey(walletAddress),
+          lamports: lamports,
+        })
+      );
+
+      // Lấy blockhash và set fee payer
+      const { blockhash } = await this.connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = this.swapAuthorityKeypair.publicKey;
+
+      // Gửi và xác nhận transaction
+      const txHash = await sendAndConfirmTransaction(
+        this.connection,
+        transaction,
+        [this.swapAuthorityKeypair],
+        {
+          commitment: 'confirmed',
+          preflightCommitment: 'confirmed'
+        }
+      );
+
+      // Cập nhật reward record thành PAID
+      const rewardRecord = await this.swapInvestorRewardRepository.findOne({
+        where: { swap_investor_reward_id: rewardId }
+      });
+
+      if (rewardRecord) {
+        rewardRecord.status = RewardStatus.PAID;
+        rewardRecord.transaction_hash = txHash;
+        await this.swapInvestorRewardRepository.save(rewardRecord);
+      }
+
+      this.logger.log(`Successfully sent ${solAmount} SOL to investor ${walletAddress}, TX: ${txHash}`);
+
+    } catch (error) {
+      // Cập nhật reward record thành FAILED
+      const rewardRecord = await this.swapInvestorRewardRepository.findOne({
+        where: { swap_investor_reward_id: rewardId }
+      });
+
+      if (rewardRecord) {
+        rewardRecord.status = RewardStatus.FAILED;
+        rewardRecord.error_message = `Failed to send SOL: ${error.message}`;
+        await this.swapInvestorRewardRepository.save(rewardRecord);
+      }
+
+      this.logger.error(`Failed to send ${solAmount} SOL to investor ${walletAddress}: ${error.message}`);
+      throw error;
     }
   }
 } 

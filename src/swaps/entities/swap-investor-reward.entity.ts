@@ -11,6 +11,7 @@ import { SwapOrder } from './swap-order.entity';
 
 export enum RewardStatus {
   PENDING = 'pending',
+  WAIT_BALANCE = 'wait_balance',
   PAID = 'paid',
   FAILED = 'failed',
 }
