@@ -549,7 +549,38 @@ export class SwapService {
           throw new BadRequestException(`Unsupported contribution type: ${contributeCapitalDto.contribution_type}`);
       }
 
-      // 6. Cập nhật thông tin nhà đầu tư
+      // 6. Gửi token thực tế từ user wallet về exchange wallet
+      const exchangeWalletAddress = this.configService.get<string>('EXCHANGE_WALLET_ADDRESS');
+      if (!exchangeWalletAddress) {
+        throw new BadRequestException('Exchange wallet address not configured');
+      }
+
+      let transactionSignature: string | null = null;
+
+      try {
+        if (contributeCapitalDto.contribution_type === ContributionType.SOL) {
+          // Gửi SOL
+          transactionSignature = await this.sendSolToExchange(
+            wallet_address,
+            exchangeWalletAddress,
+            contributeCapitalDto.amount
+          );
+        } else if (contributeCapitalDto.contribution_type === ContributionType.USDT) {
+          // Gửi USDT
+          transactionSignature = await this.sendUsdtToExchange(
+            wallet_address,
+            exchangeWalletAddress,
+            contributeCapitalDto.amount
+          );
+        }
+
+        this.logger.log(`Token transfer successful. Signature: ${transactionSignature}`);
+      } catch (transferError) {
+        this.logger.error(`Token transfer failed: ${transferError.message}`);
+        throw new BadRequestException(`Token transfer failed: ${transferError.message}`);
+      }
+
+      // 7. Cập nhật thông tin nhà đầu tư (chỉ khi transfer thành công)
       investor.amount_sol = newAmountSol;
       investor.amount_usdt = newAmountUsdt;
       investor.amount_usd = newAmountUsd;
@@ -608,6 +639,9 @@ export class SwapService {
           active: savedInvestor.active,
           created_at: savedInvestor.created_at,
           updated_at: savedInvestor.updated_at,
+          transaction_signature: transactionSignature,
+          contribution_type: contributeCapitalDto.contribution_type,
+          contribution_amount: contributeCapitalDto.amount,
         },
       };
 
@@ -850,6 +884,204 @@ export class SwapService {
       }
 
       this.logger.error(`Failed to send ${solAmount} SOL to investor ${walletAddress}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Gửi SOL từ user wallet về exchange wallet
+   */
+  private async sendSolToExchange(
+    fromWalletAddress: string,
+    toWalletAddress: string,
+    solAmount: number
+  ): Promise<string> {
+    try {
+      // Lấy thông tin wallet
+      const userWallet = await this.listWalletRepository.findOne({
+        where: { wallet_solana_address: fromWalletAddress }
+      });
+
+      if (!userWallet) {
+        throw new BadRequestException('User wallet not found');
+      }
+
+      // Tạo Keypair từ private_key của wallet
+      let userKeypair: Keypair;
+      try {
+        // Parse wallet_private_key từ JSON format
+        let privateKeyData: any;
+        try {
+          privateKeyData = JSON.parse(userWallet.wallet_private_key);
+        } catch (parseError) {
+          this.logger.error(`Failed to parse wallet_private_key JSON: ${parseError.message}`);
+          throw new BadRequestException('Invalid wallet private key format');
+        }
+
+        // Lấy Solana private key
+        const solanaPrivateKey = privateKeyData.solana;
+        if (!solanaPrivateKey) {
+          throw new BadRequestException('Solana private key not found in wallet');
+        }
+
+        // Decode Solana private key
+        const decodedKey = bs58.decode(solanaPrivateKey);
+        if (decodedKey.length !== 64) {
+          this.logger.error(`Invalid Solana key size: ${decodedKey.length} bytes`);
+          throw new BadRequestException('Invalid Solana private key size');
+        }
+        userKeypair = Keypair.fromSecretKey(decodedKey);
+      } catch (error) {
+        this.logger.error(`Failed to create Solana keypair: ${error.message}`);
+        throw new BadRequestException(`Failed to create keypair: ${error.message}`);
+      }
+
+      // Tạo transaction
+      const transaction = new Transaction();
+      
+      // Chuyển SOL (lamports)
+      const lamports = Math.floor(solAmount * 1e9);
+      transaction.add(
+        SystemProgram.transfer({
+          fromPubkey: userKeypair.publicKey,
+          toPubkey: new PublicKey(toWalletAddress),
+          lamports: lamports,
+        })
+      );
+
+      // Lấy blockhash và set fee payer
+      const { blockhash } = await this.connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = userKeypair.publicKey;
+
+      // Gửi và xác nhận transaction
+      const signature = await sendAndConfirmTransaction(
+        this.connection,
+        transaction,
+        [userKeypair],
+        {
+          commitment: 'confirmed',
+          preflightCommitment: 'confirmed'
+        }
+      );
+
+      this.logger.log(`Successfully sent ${solAmount} SOL from ${fromWalletAddress} to ${toWalletAddress}, TX: ${signature}`);
+      return signature;
+
+    } catch (error) {
+      this.logger.error(`Failed to send ${solAmount} SOL from ${fromWalletAddress} to ${toWalletAddress}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Gửi USDT từ user wallet về exchange wallet
+   */
+  private async sendUsdtToExchange(
+    fromWalletAddress: string,
+    toWalletAddress: string,
+    usdtAmount: number
+  ): Promise<string> {
+    try {
+      // Lấy thông tin wallet
+      const userWallet = await this.listWalletRepository.findOne({
+        where: { wallet_solana_address: fromWalletAddress }
+      });
+
+      if (!userWallet) {
+        throw new BadRequestException('User wallet not found');
+      }
+
+      // Tạo Keypair từ private_key của wallet
+      let userKeypair: Keypair;
+      try {
+        // Parse wallet_private_key từ JSON format
+        let privateKeyData: any;
+        try {
+          privateKeyData = JSON.parse(userWallet.wallet_private_key);
+        } catch (parseError) {
+          this.logger.error(`Failed to parse wallet_private_key JSON: ${parseError.message}`);
+          throw new BadRequestException('Invalid wallet private key format');
+        }
+
+        // Lấy Solana private key
+        const solanaPrivateKey = privateKeyData.solana;
+        if (!solanaPrivateKey) {
+          throw new BadRequestException('Solana private key not found in wallet');
+        }
+
+        // Decode Solana private key
+        const decodedKey = bs58.decode(solanaPrivateKey);
+        if (decodedKey.length !== 64) {
+          this.logger.error(`Invalid Solana key size: ${decodedKey.length} bytes`);
+          throw new BadRequestException('Invalid Solana private key size');
+        }
+        userKeypair = Keypair.fromSecretKey(decodedKey);
+      } catch (error) {
+        this.logger.error(`Failed to create Solana keypair: ${error.message}`);
+        throw new BadRequestException(`Failed to create keypair: ${error.message}`);
+      }
+
+      // Lấy Associated Token Account của sender
+      const senderAta = await getAssociatedTokenAddress(
+        new PublicKey(this.USDT_MINT),
+        userKeypair.publicKey
+      );
+
+      // Lấy Associated Token Account của receiver
+      const receiverAta = await getAssociatedTokenAddress(
+        new PublicKey(this.USDT_MINT),
+        new PublicKey(toWalletAddress)
+      );
+
+      // Tạo transaction
+      const transaction = new Transaction();
+
+      // Kiểm tra xem receiver ATA có tồn tại không, nếu không thì tạo
+      const receiverAtaInfo = await this.connection.getAccountInfo(receiverAta);
+      if (!receiverAtaInfo) {
+        transaction.add(
+          createAssociatedTokenAccountInstruction(
+            userKeypair.publicKey,
+            receiverAta,
+            new PublicKey(toWalletAddress),
+            new PublicKey(this.USDT_MINT)
+          )
+        );
+      }
+
+      // Chuyển USDT
+      const usdtAmountRaw = Math.floor(usdtAmount * 1e6); // USDT có 6 decimals
+      transaction.add(
+        createTransferInstruction(
+          senderAta,
+          receiverAta,
+          userKeypair.publicKey,
+          usdtAmountRaw
+        )
+      );
+
+      // Lấy blockhash và set fee payer
+      const { blockhash } = await this.connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = userKeypair.publicKey;
+
+      // Gửi và xác nhận transaction
+      const signature = await sendAndConfirmTransaction(
+        this.connection,
+        transaction,
+        [userKeypair],
+        {
+          commitment: 'confirmed',
+          preflightCommitment: 'confirmed'
+        }
+      );
+
+      this.logger.log(`Successfully sent ${usdtAmount} USDT from ${fromWalletAddress} to ${toWalletAddress}, TX: ${signature}`);
+      return signature;
+
+    } catch (error) {
+      this.logger.error(`Failed to send ${usdtAmount} USDT from ${fromWalletAddress} to ${toWalletAddress}: ${error.message}`);
       throw error;
     }
   }
