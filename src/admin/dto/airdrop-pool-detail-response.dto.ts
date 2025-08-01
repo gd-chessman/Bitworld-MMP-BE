@@ -99,6 +99,9 @@ export class AirdropPoolDetailResponseDto {
   @ApiProperty({ description: 'Creator address' })
   creatorAddress: string;
 
+  @ApiProperty({ description: 'Creator is Bittworld' })
+  creatorIsBittworld: boolean;
+
   @ApiProperty({ description: 'Creator Bittworld UID', required: false })
   creatorBittworldUid?: string | null;
 

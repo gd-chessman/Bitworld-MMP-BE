@@ -690,6 +690,7 @@ export class AdminService implements OnModuleInit {
       walletId: order.order_wallet_id,
       solAddress: order.wallet?.wallet_solana_address || null,
       isBittworld: order.wallet?.isBittworld || false,
+      bittworldUid: order.wallet?.isBittworld ? order.wallet?.bittworld_uid || null : null,
       order_trade_type: order.order_trade_type,
       order_token_address: order.order_token_address,
       order_token_name: order.order_token_name,
@@ -900,7 +901,7 @@ export class AdminService implements OnModuleInit {
         // Lấy thông tin root wallet
         const rootWallet = await this.listWalletRepository.findOne({
           where: { wallet_id: tree.bat_root_wallet_id },
-          select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address', 'isBittworld']
+          select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address', 'isBittworld', 'bittworld_uid']
         });
 
         // Tìm root node để lấy status
@@ -916,7 +917,8 @@ export class AdminService implements OnModuleInit {
             solanaAddress: rootWallet.wallet_solana_address,
             nickName: rootWallet.wallet_nick_name,
             ethAddress: rootWallet.wallet_eth_address,
-            isBittworld: rootWallet.isBittworld
+            isBittworld: rootWallet.isBittworld,
+            bittworldUid: rootWallet.isBittworld ? rootWallet.bittworld_uid || null : null
           } : null,
           totalCommissionPercent: tree.bat_total_commission_percent,
           batAlias: tree.bat_alias,
@@ -978,7 +980,7 @@ export class AdminService implements OnModuleInit {
     // Lấy thông tin root wallet
     const rootWallet = await this.listWalletRepository.findOne({
       where: { wallet_id: rootWalletId },
-      select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address']
+      select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address', 'isBittworld', 'bittworld_uid']
     });
 
     // Tìm root node để lấy status
@@ -994,6 +996,8 @@ export class AdminService implements OnModuleInit {
         solanaAddress: rootWallet.wallet_solana_address,
         nickName: rootWallet.wallet_nick_name,
         ethAddress: rootWallet.wallet_eth_address,
+        isBittworld: rootWallet.isBittworld,
+        bittworldUid: rootWallet.isBittworld ? rootWallet.bittworld_uid || null : null,
         status: rootNode ? rootNode.ban_status : true
       } : null,
       treeInfo: {
@@ -1015,7 +1019,7 @@ export class AdminService implements OnModuleInit {
     // Lấy thông tin member wallet
     const memberWallet = await this.listWalletRepository.findOne({
       where: { wallet_id: memberWalletId },
-      select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address']
+      select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address', 'isBittworld', 'bittworld_uid']
     });
 
     // Tìm member node để lấy status
@@ -1027,7 +1031,7 @@ export class AdminService implements OnModuleInit {
     if (bgAffiliateInfo.parentWalletId) {
       referrerWallet = await this.listWalletRepository.findOne({
         where: { wallet_id: bgAffiliateInfo.parentWalletId },
-        select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address']
+        select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address', 'isBittworld', 'bittworld_uid']
       });
       referrerNode = allNodes.find(node => node.ban_wallet_id === bgAffiliateInfo.parentWalletId);
     }
@@ -1042,6 +1046,8 @@ export class AdminService implements OnModuleInit {
         solanaAddress: memberWallet.wallet_solana_address,
         nickName: memberWallet.wallet_nick_name,
         ethAddress: memberWallet.wallet_eth_address,
+        isBittworld: memberWallet.isBittworld,
+        bittworldUid: memberWallet.isBittworld ? memberWallet.bittworld_uid || null : null,
         status: memberNode ? memberNode.ban_status : true
       } : null,
       referrerInfo: referrerWallet ? {
@@ -1049,6 +1055,8 @@ export class AdminService implements OnModuleInit {
         solanaAddress: referrerWallet.wallet_solana_address,
         nickName: referrerWallet.wallet_nick_name,
         ethAddress: referrerWallet.wallet_eth_address,
+        isBittworld: referrerWallet.isBittworld,
+        bittworldUid: referrerWallet.isBittworld ? referrerWallet.bittworld_uid || null : null,
         commissionPercent: bgAffiliateInfo.commissionPercent,
         level: bgAffiliateInfo.level,
         status: referrerNode ? referrerNode.ban_status : true
@@ -2528,7 +2536,9 @@ export class AdminService implements OnModuleInit {
       originator: pool.originator ? {
         wallet_id: pool.originator.wallet_id,
         solana_address: pool.originator.wallet_solana_address,
-        nick_name: pool.originator.wallet_nick_name
+        nick_name: pool.originator.wallet_nick_name,
+        isBittworld: pool.originator.isBittworld,
+        bittworldUid: pool.originator.isBittworld ? pool.originator.bittworld_uid || null : null
       } : undefined
     }));
 
@@ -2595,7 +2605,8 @@ export class AdminService implements OnModuleInit {
 
     // Get pool creator wallet information
     const creatorWallet = await this.listWalletRepository.findOne({
-      where: { wallet_id: pool.alp_originator }
+      where: { wallet_id: pool.alp_originator },
+      select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address', 'isBittworld', 'bittworld_uid']
     });
 
     // Get all transactions in the pool
@@ -2617,7 +2628,8 @@ export class AdminService implements OnModuleInit {
       status: pool.apl_status,
       transactionHash: pool.apl_hash,
       creatorAddress: creatorWallet?.wallet_solana_address || '',
-      creatorBittworldUid: creatorWallet?.bittworld_uid || null,
+      creatorIsBittworld: creatorWallet?.isBittworld || false,
+      creatorBittworldUid: creatorWallet?.isBittworld ? creatorWallet?.bittworld_uid || null : null,
       members: members,
       transactions: transactions
     };

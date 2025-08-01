@@ -43,6 +43,8 @@ export class AirdropPoolResponseDto {
     wallet_id: number;
     solana_address: string;
     nick_name?: string;
+    isBittworld?: boolean;
+    bittworldUid?: string | null;
   };
 }
 
