@@ -672,6 +672,7 @@ export class BgRefService {
           solanaAddress: wallet?.wallet_solana_address || null,
           commissionPercent: child.ban_commission_percent,
           effectiveFrom: child.ban_effective_from,
+          bgAlias: child.bg_alias,
           totalVolume: nodeStats.totalVolume,
           totalReward: nodeStats.totalReward,
           totalTrans: nodeStats.totalTrans,
@@ -727,7 +728,12 @@ export class BgRefService {
       select: ['wallet_solana_address']
     });
 
-    // Transform data để thay bacr_wallet_id bằng bacr_wallet
+    // Lấy thông tin bg_alias từ bảng bg_affiliate_nodes
+    const bgNode = await this.bgAffiliateNodeRepository.findOne({
+      where: { ban_wallet_id: walletId }
+    });
+
+    // Transform data để thay bacr_wallet_id bằng bacr_wallet và thêm bgAlias
     return rewards.map(reward => ({
       bacr_id: reward.bacr_id,
       bacr_tree_id: reward.bacr_tree_id,
@@ -735,7 +741,8 @@ export class BgRefService {
       bacr_wallet: wallet?.wallet_solana_address || null,
       bacr_commission_amount: reward.bacr_commission_amount,
       bacr_level: reward.bacr_level,
-      bacr_created_at: reward.bacr_created_at
+      bacr_created_at: reward.bacr_created_at,
+      bgAlias: bgNode?.bg_alias || null
     }));
   }
 
@@ -1035,6 +1042,7 @@ export class BgRefService {
       level: number;
       commissionPercent: number;
       effectiveFrom: Date;
+      bgAlias?: string;
       walletInfo?: {
         nickName: string;
         solanaAddress: string;
@@ -1071,6 +1079,7 @@ export class BgRefService {
       level: number;
       commissionPercent: number;
       effectiveFrom: Date;
+      bgAlias?: string;
       walletInfo?: any;
     }> = [];
 
@@ -1089,6 +1098,7 @@ export class BgRefService {
           level: currentLevel,
           commissionPercent: child.ban_commission_percent,
           effectiveFrom: child.ban_effective_from,
+          bgAlias: child.bg_alias,
           walletInfo: wallet ? {
             nickName: wallet.wallet_nick_name,
             solanaAddress: wallet.wallet_solana_address,
@@ -1177,6 +1187,7 @@ export class BgRefService {
       totalVolume: number;
       totalTransactions: number;
       lastTransactionDate?: Date;
+      bgAlias?: string;
       walletInfo?: {
         nickName: string;
         solanaAddress: string;
@@ -1209,6 +1220,7 @@ export class BgRefService {
       totalVolume: number;
       totalTransactions: number;
       lastTransactionDate?: Date;
+      bgAlias?: string;
       walletInfo?: any;
     }> = [];
 
@@ -1289,6 +1301,7 @@ export class BgRefService {
         totalVolume: memberTransactionVolume,
         totalTransactions: memberTransactionCount,
         lastTransactionDate: memberLastTransaction,
+        bgAlias: member.bgAlias,
         walletInfo: member.walletInfo
       });
 

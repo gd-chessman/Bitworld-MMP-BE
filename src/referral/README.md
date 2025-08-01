@@ -40,7 +40,7 @@ PUT /bg-ref/nodes/alias
 ```json
 {
   "success": true,
-  "message": "Cập nhật bg_alias thành công",
+  "message": "BG alias updated successfully",
   "fromWallet": {
     "walletId": 123456,
     "solanaAddress": "ABC123...",
@@ -79,6 +79,59 @@ GET /bg-ref/trees
 #### 7. Lấy thống kê downline
 ```
 GET /bg-ref/downline-stats
+```
+
+**Query Parameters:**
+- `startDate`: Ngày bắt đầu (YYYY-MM-DD)
+- `endDate`: Ngày kết thúc (YYYY-MM-DD)
+- `minCommission`: Commission tối thiểu
+- `maxCommission`: Commission tối đa
+- `minVolume`: Volume tối thiểu
+- `maxVolume`: Volume tối đa
+- `level`: Cấp độ cụ thể
+- `sortBy`: Sắp xếp theo (commission, volume, transactions, level)
+- `sortOrder`: Thứ tự sắp xếp (asc, desc)
+
+**Response:**
+```json
+{
+  "isBgAffiliate": true,
+  "totalMembers": 15,
+  "membersByLevel": {
+    "level1": 5,
+    "level2": 8,
+    "level3": 2
+  },
+  "totalCommissionEarned": 1250.75,
+  "totalVolume": 50000.00,
+  "totalTransactions": 150,
+  "stats": {
+    "level1": {
+      "count": 5,
+      "totalCommission": 500.25,
+      "totalVolume": 20000.00,
+      "totalTransactions": 50
+    }
+  },
+  "detailedMembers": [
+    {
+      "walletId": 789012,
+      "level": 1,
+      "commissionPercent": 25.00,
+      "totalCommission": 100.50,
+      "totalVolume": 5000.00,
+      "totalTransactions": 10,
+      "lastTransactionDate": "2024-01-28T10:30:00Z",
+      "bgAlias": "My Custom Alias",
+      "walletInfo": {
+        "nickName": "Member 1",
+        "solanaAddress": "DEF456...",
+        "ethAddress": "0x123...",
+        "createdAt": "2024-01-15T09:00:00Z"
+      }
+    }
+  ]
+}
 ```
 
 ## Logic hoạt động
@@ -127,4 +180,9 @@ GET /bg-ref/downline-stats
 3. **Error Handling:**
    - Trả về lỗi nếu wallet không thuộc hệ thống BG affiliate
    - Trả về lỗi nếu không có quyền cập nhật (không phải tuyến trên)
-   - Trả về lỗi nếu hai wallet không cùng cây affiliate 
+   - Trả về lỗi nếu hai wallet không cùng cây affiliate
+
+4. **Downline Stats với bgAlias:**
+   - API `downline-stats` hiện bao gồm thông tin `bgAlias` cho mỗi member
+   - `bgAlias` có thể là `null` nếu chưa được cập nhật
+   - Thông tin alias được lấy từ bảng `bg_affiliate_nodes` 
