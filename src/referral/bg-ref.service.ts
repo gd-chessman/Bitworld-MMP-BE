@@ -661,7 +661,8 @@ export class BgRefService {
       for (const child of children) {
         // Lấy thông tin wallet
         const wallet = await this.listWalletRepository.findOne({
-          where: { wallet_id: child.ban_wallet_id }
+          where: { wallet_id: child.ban_wallet_id },
+          select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address', 'isBittworld', 'bittworld_uid']
         });
 
         // Lấy thống kê cho node này
@@ -680,7 +681,9 @@ export class BgRefService {
             walletId: wallet.wallet_id,
             nickName: wallet.wallet_nick_name,
             solanaAddress: wallet.wallet_solana_address,
-            ethAddress: wallet.wallet_eth_address
+            ethAddress: wallet.wallet_eth_address,
+            isBittworld: wallet.isBittworld,
+            bittworldUid: wallet.isBittworld ? wallet.bittworld_uid || null : null
           } : null,
           children: await buildHierarchicalStructure(child.ban_wallet_id)
         };
@@ -725,7 +728,7 @@ export class BgRefService {
     // Lấy thông tin wallet để map địa chỉ Solana
     const wallet = await this.listWalletRepository.findOne({
       where: { wallet_id: walletId },
-      select: ['wallet_solana_address']
+      select: ['wallet_solana_address', 'isBittworld', 'bittworld_uid']
     });
 
     // Lấy thông tin bg_alias từ bảng bg_affiliate_nodes
@@ -742,7 +745,9 @@ export class BgRefService {
       bacr_commission_amount: reward.bacr_commission_amount,
       bacr_level: reward.bacr_level,
       bacr_created_at: reward.bacr_created_at,
-      bgAlias: bgNode?.bg_alias || null
+      bgAlias: bgNode?.bg_alias || null,
+      isBittworld: wallet?.isBittworld || false,
+      bittworldUid: wallet?.isBittworld ? wallet?.bittworld_uid || null : null
     }));
   }
 
@@ -1047,6 +1052,8 @@ export class BgRefService {
         nickName: string;
         solanaAddress: string;
         ethAddress: string;
+        isBittworld: boolean;
+        bittworldUid: string | null;
         createdAt: Date;
       };
     }>;
@@ -1090,7 +1097,8 @@ export class BgRefService {
       for (const child of children) {
         // Lấy thông tin wallet
         const wallet = await this.listWalletRepository.findOne({
-          where: { wallet_id: child.ban_wallet_id }
+          where: { wallet_id: child.ban_wallet_id },
+          select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address', 'isBittworld', 'bittworld_uid']
         });
 
         downlineMembers.push({
@@ -1103,6 +1111,8 @@ export class BgRefService {
             nickName: wallet.wallet_nick_name,
             solanaAddress: wallet.wallet_solana_address,
             ethAddress: wallet.wallet_eth_address,
+            isBittworld: wallet.isBittworld,
+            bittworldUid: wallet.isBittworld ? wallet.bittworld_uid || null : null,
             createdAt: child.ban_effective_from
           } : null
         });
@@ -1192,6 +1202,8 @@ export class BgRefService {
         nickName: string;
         solanaAddress: string;
         ethAddress: string;
+        isBittworld: boolean;
+        bittworldUid: string | null;
         createdAt: Date;
       };
     }>;
