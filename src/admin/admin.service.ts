@@ -2522,27 +2522,44 @@ export class AdminService implements OnModuleInit {
       .take(limit)
       .getMany();
 
-    // Transform data to match DTO
-    const transformedPools: AirdropPoolResponseDto[] = pools.map(pool => ({
-      alp_id: pool.alp_id,
-      alp_originator: pool.alp_originator,
-      alp_name: pool.alp_name,
-      alp_slug: pool.alp_slug,
-      alp_describe: pool.alp_describe,
-      alp_logo: pool.alp_logo,
-      alp_member_num: pool.alp_member_num,
-      apl_volume: Number(pool.apl_volume),
-      apl_creation_date: pool.apl_creation_date,
-      apl_end_date: pool.apl_end_date,
-      apl_status: pool.apl_status,
-      apl_hash: pool.apl_hash,
-      originator: pool.originator ? {
-        wallet_id: pool.originator.wallet_id,
-        solana_address: pool.originator.wallet_solana_address,
-        nick_name: pool.originator.wallet_nick_name,
-        isBittworld: pool.originator.isBittworld,
-        bittworldUid: pool.originator.isBittworld ? pool.originator.bittworld_uid || null : null
-      } : undefined
+    // Transform data to match DTO with total volume calculation
+    const transformedPools: AirdropPoolResponseDto[] = await Promise.all(pools.map(async pool => {
+      // Calculate total volume: initial volume + total stake volume
+      const allPoolStakes = await this.airdropPoolJoinRepository.find({
+        where: {
+          apj_pool_id: pool.alp_id,
+          apj_status: AirdropPoolJoinStatus.ACTIVE
+        }
+      });
+
+      // Calculate total stake volume
+      const totalStakeVolume = allPoolStakes.reduce((sum, stake) => sum + Number(stake.apj_volume), 0);
+      
+      // Total volume = initial volume + total stake volume
+      const apl_total_volume = Number(pool.apl_volume) + totalStakeVolume;
+
+      return {
+        alp_id: pool.alp_id,
+        alp_originator: pool.alp_originator,
+        alp_name: pool.alp_name,
+        alp_slug: pool.alp_slug,
+        alp_describe: pool.alp_describe,
+        alp_logo: pool.alp_logo,
+        alp_member_num: pool.alp_member_num,
+        apl_volume: Number(pool.apl_volume),
+        apl_total_volume: apl_total_volume,
+        apl_creation_date: pool.apl_creation_date,
+        apl_end_date: pool.apl_end_date,
+        apl_status: pool.apl_status,
+        apl_hash: pool.apl_hash,
+        originator: pool.originator ? {
+          wallet_id: pool.originator.wallet_id,
+          solana_address: pool.originator.wallet_solana_address,
+          nick_name: pool.originator.wallet_nick_name,
+          isBittworld: pool.originator.isBittworld,
+          bittworldUid: pool.originator.isBittworld ? pool.originator.bittworld_uid || null : null
+        } : undefined
+      };
     }));
 
     return {
@@ -2612,6 +2629,20 @@ export class AdminService implements OnModuleInit {
       select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address', 'isBittworld', 'bittworld_uid']
     });
 
+    // Calculate total volume: initial volume + total stake volume
+    const allPoolStakes = await this.airdropPoolJoinRepository.find({
+      where: {
+        apj_pool_id: pool.alp_id,
+        apj_status: AirdropPoolJoinStatus.ACTIVE
+      }
+    });
+
+    // Calculate total stake volume
+    const totalStakeVolume = allPoolStakes.reduce((sum, stake) => sum + Number(stake.apj_volume), 0);
+    
+    // Total volume = initial volume + total stake volume
+    const totalVolume = Number(pool.apl_volume) + totalStakeVolume;
+
     // Get all transactions in the pool
     const transactions = await this.getAirdropPoolTransactions(pool.alp_id);
 
@@ -2625,7 +2656,7 @@ export class AdminService implements OnModuleInit {
       logo: pool.alp_logo,
       describe: pool.alp_describe,
       memberCount: pool.alp_member_num,
-      totalVolume: Number(pool.apl_volume),
+      totalVolume: totalVolume,
       creationDate: pool.apl_creation_date,
       endDate: pool.apl_end_date,
       status: pool.apl_status,

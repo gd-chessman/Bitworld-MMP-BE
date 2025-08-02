@@ -23,8 +23,11 @@ export class AirdropPoolResponseDto {
   @ApiProperty({ description: 'Number of members' })
   alp_member_num: number;
 
-  @ApiProperty({ description: 'Total volume' })
+  @ApiProperty({ description: 'Initial volume' })
   apl_volume: number;
+
+  @ApiProperty({ description: 'Total volume (initial + stake volume)' })
+  apl_total_volume: number;
 
   @ApiProperty({ description: 'Creation date' })
   apl_creation_date: Date;
