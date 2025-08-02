@@ -896,7 +896,7 @@ export class AdminService implements OnModuleInit {
   /**
    * Lấy danh sách tất cả BG affiliate trees
    */
-  async getAllBgAffiliateTrees(currentUser?: UserAdmin): Promise<any[]> {
+  async getAllBgAffiliateTrees(currentUser?: UserAdmin, isBittworld?: 'true' | 'false'): Promise<any[]> {
     const trees = await this.bgRefService.getAllBgAffiliateTrees();
     
     // Format dữ liệu để trả về với thông tin wallet
@@ -933,6 +933,14 @@ export class AdminService implements OnModuleInit {
         };
       })
     );
+
+    // Filter theo isBittworld nếu có
+    if (isBittworld !== undefined) {
+      const filterValue = isBittworld === 'true';
+      treesWithWalletInfo = treesWithWalletInfo.filter(tree => 
+        tree.rootWallet && tree.rootWallet.isBittworld === filterValue
+      );
+    }
     
     return treesWithWalletInfo;
   }

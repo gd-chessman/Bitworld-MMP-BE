@@ -316,8 +316,11 @@ export class AdminController {
   @Get('bg-affiliate/trees')
   @ApiOperation({ summary: 'Get all BG affiliate trees' })
   @ApiResponse({ status: 200, description: 'Returns list of BG affiliate trees' })
-  async getAllBgAffiliateTrees(@Request() req: any): Promise<any[]> {
-    return this.adminService.getAllBgAffiliateTrees(req.user);
+  async getAllBgAffiliateTrees(
+    @Request() req: any,
+    @Query('isBittworld') isBittworld?: 'true' | 'false'
+  ): Promise<any[]> {
+    return this.adminService.getAllBgAffiliateTrees(req.user, isBittworld);
   }
 
   @UseGuards(JwtAuthAdminGuard)
