@@ -23,6 +23,8 @@ import { AuthModule } from '../auth/auth.module';
 import { WalletAuth } from '../telegram-wallets/entities/wallet-auth.entity';
 import { CacheModule } from '../cache/cache.module';
 import { UserWallet } from '../telegram-wallets/entities/user-wallet.entity';
+import { BittworldsModule } from '../bittworlds/bittworlds.module';
+import { ReferralModule } from '../referral/referral.module';
 
 @Module({
     imports: [
@@ -47,7 +49,9 @@ import { UserWallet } from '../telegram-wallets/entities/user-wallet.entity';
         forwardRef(() => TradeModule),
         PumpFunModule,
         AuthModule,
-        CacheModule
+        CacheModule,
+        BittworldsModule,
+        ReferralModule
     ],
     controllers: [MasterTradingController],
     providers: [MasterTradingService, SolanaWebSocketService],

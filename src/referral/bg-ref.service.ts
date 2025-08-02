@@ -203,7 +203,7 @@ export class BgRefService {
     treeId: number,
     orderId: number,
     transactionAmount: number,
-    commissionRate: number = 0.01, // 1% phí giao dịch
+    commissionRate: number = 0.01, // 1% phí giao dịch mặc định
     traderWalletId?: number // ID của wallet thực hiện giao dịch
   ): Promise<{
     success: boolean;
@@ -229,7 +229,30 @@ export class BgRefService {
       throw new NotFoundException('Affiliate tree does not exist');
     }
 
-    const totalCommission = transactionAmount * commissionRate;
+    // Tính commission dựa trên trường isBittworld của wallet giao dịch
+    let actualCommissionRate = commissionRate; // Mặc định 1%
+
+    if (traderWalletId) {
+      // Lấy thông tin wallet giao dịch
+      const traderWallet = await this.listWalletRepository.findOne({
+        where: { wallet_id: traderWalletId },
+        select: ['wallet_id', 'isBittworld']
+      });
+
+      if (traderWallet) {
+        // Nếu wallet được tạo từ Bittworld thì commission = 0.7%
+        if (traderWallet.isBittworld) {
+          actualCommissionRate = 0.007; // 0.7%
+        }
+        // Nếu không phải Bittworld thì giữ nguyên 1%
+      }
+    }
+
+    // Thuật toán tính commission:
+    // - Ví không phải Bittworld (isBittworld = false): Commission = Volume × 1%
+    // - Ví từ Bittworld (isBittworld = true): Commission = Volume × 0.7%
+
+    const totalCommission = transactionAmount * actualCommissionRate;
     const rewards: BgAffiliateCommissionReward[] = [];
 
     // Nếu không có traderWalletId, sử dụng logic cũ (tính cho tất cả nodes)

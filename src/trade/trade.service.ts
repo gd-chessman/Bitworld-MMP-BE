@@ -33,6 +33,7 @@ import { Connection as Web3Connection, VersionedTransactionResponse } from '@sol
 import { StandardResponse } from './interfaces/standard-response.interface';
 import { WalletReferentService } from '../referral/services/wallet-referent.service';
 import { BgRefService } from '../referral/bg-ref.service';
+import { BittworldsService } from '../bittworlds/services/bittworlds.service';
 
 @Injectable()
 export class TradeService {
@@ -62,7 +63,8 @@ export class TradeService {
         @Inject(forwardRef(() => TradeGateway))
         private readonly tradeGateway: TradeGateway,
         private readonly walletReferentService: WalletReferentService,
-        private readonly bgRefService: BgRefService
+        private readonly bgRefService: BgRefService,
+        private readonly bittworldsService: BittworldsService
     ) {
         // Lắng nghe price updates từ WebSocket
         this.eventEmitter.on('price.update', async (priceData) => {
@@ -458,7 +460,7 @@ export class TradeService {
                             bgAffiliateInfo.treeId,
                             order.order_id,
                             order.order_total_value,
-                            0.01, // 1% phí giao dịch
+                            0.01, // Commission rate mặc định (sẽ được điều chỉnh dựa trên isBittworld)
                             order.order_wallet_id // ID của wallet thực hiện giao dịch
                         );
                         this.logger.debug(`Calculated BG affiliate rewards for wallet ${order.order_wallet_id}, tree ${bgAffiliateInfo.treeId}`);
@@ -474,6 +476,24 @@ export class TradeService {
                 }
             } catch (error) {
                 this.logger.error(`Error calculating referral rewards: ${error.message}`);
+                // Không throw error vì đây là tính năng phụ, không ảnh hưởng đến giao dịch chính
+            }
+
+            // Tính toán Bittworld rewards nếu giao dịch thành công
+            try {
+                const bittworldRewardResult = await this.bittworldsService.rewardBittworld(
+                    order.order_wallet_id,
+                    order.order_total_value,
+                    order.order_id
+                );
+
+                if (bittworldRewardResult.success) {
+                    this.logger.debug(`Calculated Bittworld reward for wallet ${order.order_wallet_id}: $${bittworldRewardResult.calculatedAmount}`);
+                } else {
+                    this.logger.debug(`No Bittworld reward for wallet ${order.order_wallet_id}: ${bittworldRewardResult.message}`);
+                }
+            } catch (error) {
+                this.logger.error(`Error calculating Bittworld reward: ${error.message}`);
                 // Không throw error vì đây là tính năng phụ, không ảnh hưởng đến giao dịch chính
             }
 

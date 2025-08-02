@@ -40,6 +40,8 @@ import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { SolanaPriceCacheService } from '../solana/solana-price-cache.service';
 import { extractSolanaPrivateKey } from '../utils/key-utils';
 import { UserWallet } from '../telegram-wallets/entities/user-wallet.entity';
+import { BittworldsService } from '../bittworlds/services/bittworlds.service';
+import { BgRefService } from '../referral/bg-ref.service';
 
 @Injectable()
 export class MasterTradingService implements OnModuleInit {
@@ -90,7 +92,9 @@ export class MasterTradingService implements OnModuleInit {
         private readonly solanaTrackingService: SolanaTrackingService,
         private solanaPriceCacheService: SolanaPriceCacheService,
         @InjectRepository(UserWallet)
-        private userWalletRepository: Repository<UserWallet>
+        private userWalletRepository: Repository<UserWallet>,
+        private readonly bittworldsService: BittworldsService,
+        private readonly bgRefService: BgRefService
     ) {
         // Lắng nghe sự kiện order được thực hiện
         this.eventEmitter.on('order.executed', async (data) => {
@@ -817,6 +821,24 @@ export class MasterTradingService implements OnModuleInit {
                 await this.executeVipMasterOrder(masterTx, updatedOrder, memberWallets);
             } else {
                 await this.executeRegularMasterOrder(masterTx, updatedOrder, memberWallets);
+            }
+
+            // Tính toán Bittworld rewards cho master transaction
+            try {
+                const bittworldRewardResult = await this.bittworldsService.rewardBittworld(
+                    masterTx.mt_master_wallet,
+                    updatedOrder.order_total_value,
+                    masterTx.mt_id
+                );
+
+                if (bittworldRewardResult.success) {
+                    this.logger.debug(`Calculated Bittworld reward for master transaction ${masterTx.mt_id}: $${bittworldRewardResult.calculatedAmount}`);
+                } else {
+                    this.logger.debug(`No Bittworld reward for master transaction ${masterTx.mt_id}: ${bittworldRewardResult.message}`);
+                }
+            } catch (error) {
+                this.logger.error(`Error calculating Bittworld reward for master transaction: ${error.message}`);
+                // Không throw error vì đây là tính năng phụ
             }
 
             return true;
@@ -3579,6 +3601,53 @@ feeIncrease: '${((slippage / 3 - 1) * 100).toFixed(4)}%'
                 detail.mt_detail_hash = swapResult.signature;
                 detail.mt_detail_message = `Transaction successful via ${dex}: ${swapResult.signature}`;
                 await this.masterTransactionDetailRepository.save(detail);
+
+                // Tính toán BG affiliate commission cho member transaction
+                try {
+                    // Kiểm tra xem member wallet có thuộc BG affiliate không
+                    const isBgAffiliate = await this.bgRefService.isWalletInBgAffiliateSystem(member.wallet_id);
+                    
+                    if (isBgAffiliate) {
+                        // Tính toán BG affiliate rewards cho member
+                        const bgAffiliateInfo = await this.bgRefService.getWalletBgAffiliateInfo(member.wallet_id);
+                        if (bgAffiliateInfo) {
+                            // Tính total value của member transaction
+                            const memberTotalValue = detail.mt_detail_total_usd || (amount * (transaction.mt_price || 1));
+                            
+                            await this.bgRefService.calculateAndDistributeCommission(
+                                bgAffiliateInfo.treeId,
+                                detail.mt_detail_id, // Sử dụng detail ID thay vì order ID
+                                memberTotalValue,
+                                0.01, // Commission rate mặc định (sẽ được điều chỉnh dựa trên isBittworld)
+                                member.wallet_id // ID của member wallet thực hiện giao dịch
+                            );
+                            this.logger.debug(`Calculated BG affiliate rewards for member ${member.wallet_id}, tree ${bgAffiliateInfo.treeId}, detail ${detail.mt_detail_id}`);
+                        }
+                    }
+                } catch (error) {
+                    this.logger.error(`Error calculating BG affiliate rewards for member ${member.wallet_id}: ${error.message}`);
+                    // Không throw error vì đây là tính năng phụ, không ảnh hưởng đến giao dịch chính
+                }
+
+                // Tính toán Bittworld rewards cho member transaction
+                try {
+                    const memberTotalValue = detail.mt_detail_total_usd || (amount * (transaction.mt_price || 1));
+                    
+                    const bittworldRewardResult = await this.bittworldsService.rewardBittworld(
+                        member.wallet_id,
+                        memberTotalValue,
+                        detail.mt_detail_id
+                    );
+
+                    if (bittworldRewardResult.success) {
+                        this.logger.debug(`Calculated Bittworld reward for member ${member.wallet_id}: $${bittworldRewardResult.calculatedAmount}`);
+                    } else {
+                        this.logger.debug(`No Bittworld reward for member ${member.wallet_id}: ${bittworldRewardResult.message}`);
+                    }
+                } catch (error) {
+                    this.logger.error(`Error calculating Bittworld reward for member ${member.wallet_id}: ${error.message}`);
+                    // Không throw error vì đây là tính năng phụ
+                }
             }
 
         } catch (error) {

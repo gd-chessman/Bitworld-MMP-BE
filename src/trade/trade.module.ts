@@ -33,6 +33,7 @@ import { WebSocketModule } from '../websocket/websocket.module';
 import { CacheModule } from '../cache/cache.module';
 import { BirdeyeService } from '../on-chain/birdeye.service';
 import { ReferralModule } from '../referral/referral.module';
+import { BittworldsModule } from '../bittworlds/bittworlds.module';
 
 @Module({
     imports: [
@@ -65,7 +66,8 @@ import { ReferralModule } from '../referral/referral.module';
         forwardRef(() => SolanaTokensModule),
         forwardRef(() => SharedWebSocketModule),
         forwardRef(() => WebSocketModule),
-        ReferralModule
+        ReferralModule,
+        BittworldsModule
     ],
     controllers: [TradeController],
     providers: [
