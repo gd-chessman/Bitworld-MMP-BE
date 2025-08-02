@@ -1555,7 +1555,8 @@ export class TelegramWalletsService {
             // Default tokens to always include
             const defaultTokens = [
                 'So11111111111111111111111111111111111111112', // SOL
-                'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB' // USDT
+                'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
+                '4DaQEZKVnRiTZjN5HS9TdsuRiknCWPX6Ux6tDRRLvtAN' // BITT
             ];
 
             // Get balances for default tokens that are not in user's token accounts
@@ -1586,6 +1587,19 @@ export class TelegramWalletsService {
                     );
                 } catch (error) {
                     this.logger.error(`Error fetching USDT balance: ${error.message}`);
+                }
+            }
+
+            // Get BITT balance if not in token accounts
+            let bittBalance = 0;
+            if (missingDefaultTokens.includes('4DaQEZKVnRiTZjN5HS9TdsuRiknCWPX6Ux6tDRRLvtAN')) {
+                try {
+                    bittBalance = await this.solanaService.getTokenBalance(
+                        walletAddress, 
+                        '4DaQEZKVnRiTZjN5HS9TdsuRiknCWPX6Ux6tDRRLvtAN'
+                    );
+                } catch (error) {
+                    this.logger.error(`Error fetching BITT balance: ${error.message}`);
                 }
             }
 
@@ -1620,15 +1634,31 @@ export class TelegramWalletsService {
                 }
             }
             
-            // Add all other tokens (excluding SOL and USDT which are already added)
+            // Add BITT third (always at index 2)
+            if (missingDefaultTokens.includes('4DaQEZKVnRiTZjN5HS9TdsuRiknCWPX6Ux6tDRRLvtAN')) {
+                allTokenAccounts.push({
+                    mint: '4DaQEZKVnRiTZjN5HS9TdsuRiknCWPX6Ux6tDRRLvtAN',
+                    amount: bittBalance
+                });
+            } else {
+                // Find BITT in user's token accounts and add it third
+                const bittAccount = tokenAccounts.find(account => account.mint === '4DaQEZKVnRiTZjN5HS9TdsuRiknCWPX6Ux6tDRRLvtAN');
+                if (bittAccount) {
+                    allTokenAccounts.push(bittAccount);
+                }
+            }
+            
+            // Add all other tokens (excluding SOL, USDT and BITT which are already added)
             const otherTokens = tokenAccounts.filter(account => 
                 account.mint !== 'So11111111111111111111111111111111111111112' && 
-                account.mint !== 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'
+                account.mint !== 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB' &&
+                account.mint !== '4DaQEZKVnRiTZjN5HS9TdsuRiknCWPX6Ux6tDRRLvtAN'
             );
             allTokenAccounts.push(...otherTokens);
 
             const USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
             const SOL_MINT = 'So11111111111111111111111111111111111111112';
+            const BITT_MINT = '4DaQEZKVnRiTZjN5HS9TdsuRiknCWPX6Ux6tDRRLvtAN';
 
             const tokens = await Promise.all(allTokenAccounts.map(async (account) => {
                 // Always override USDT info
@@ -1643,6 +1673,25 @@ export class TelegramWalletsService {
                         token_symbol: 'USDT',
                         token_logo_url: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.svg',
                         token_decimals: 6,
+                        token_balance: account.amount,
+                        token_balance_usd: account.amount * priceUSD,
+                        token_price_usd: priceUSD,
+                        token_price_sol: priceSOL,
+                        is_verified: true
+                    };
+                }
+                // Always override BITT info
+                if (account.mint === BITT_MINT) {
+                    // Lấy giá BITT thực tế nếu có
+                    const tokenPrice = await this.solanaService.getTokenPricesInRealTime([BITT_MINT]);
+                    const priceUSD = tokenPrice?.get(BITT_MINT)?.priceUSD || 0;
+                    const priceSOL = tokenPrice?.get(BITT_MINT)?.priceSOL || 0;
+                    return {
+                        token_address: BITT_MINT,
+                        token_name: 'Bitcoin AI Trading Token',
+                        token_symbol: 'BITT',
+                        token_logo_url: 'https://ipfs.filebase.io/ipfs/QmYXoGub5bFrqMGDtCM6WuCKch4BUizmENR4R8MQxW2bfq',
+                        token_decimals: 9,
                         token_balance: account.amount,
                         token_balance_usd: account.amount * priceUSD,
                         token_price_usd: priceUSD,
@@ -2596,6 +2645,7 @@ export class TelegramWalletsService {
             const walletAddress = wallet.wallet_solana_address;
             const USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
             const SOL_MINT = 'So11111111111111111111111111111111111111112';
+            const BITT_MINT = '4DaQEZKVnRiTZjN5HS9TdsuRiknCWPX6Ux6tDRRLvtAN';
 
             // Get SOL balance
             let solBalance = 0;
@@ -2616,13 +2666,23 @@ export class TelegramWalletsService {
                 this.logger.error(`Error fetching USDT balance: ${error.message}`);
             }
 
+            // Get BITT balance
+            let bittBalance = 0;
+            try {
+                bittBalance = await this.solanaService.getTokenBalance(walletAddress, BITT_MINT);
+            } catch (error) {
+                this.logger.error(`Error fetching BITT balance: ${error.message}`);
+            }
+
             // Get token prices
-            const tokenPrices = await this.solanaService.getTokenPricesInRealTime([SOL_MINT, USDT_MINT]);
+            const tokenPrices = await this.solanaService.getTokenPricesInRealTime([SOL_MINT, USDT_MINT, BITT_MINT]);
             
             const solPriceUSD = tokenPrices?.get(SOL_MINT)?.priceUSD || 0;
             const solPriceSOL = 1; // SOL price in SOL is always 1
             const usdtPriceUSD = tokenPrices?.get(USDT_MINT)?.priceUSD || 1;
             const usdtPriceSOL = tokenPrices?.get(USDT_MINT)?.priceSOL || 0;
+            const bittPriceUSD = tokenPrices?.get(BITT_MINT)?.priceUSD || 0;
+            const bittPriceSOL = tokenPrices?.get(BITT_MINT)?.priceSOL || 0;
 
             const solInfo = {
                 token_address: SOL_MINT,
@@ -2650,13 +2710,27 @@ export class TelegramWalletsService {
                 is_verified: true
             };
 
+            const bittInfo = {
+                token_address: BITT_MINT,
+                token_name: 'Bitcoin AI Trading Token',
+                token_symbol: 'BITT',
+                token_logo_url: 'https://ipfs.filebase.io/ipfs/QmYXoGub5bFrqMGDtCM6WuCKch4BUizmENR4R8MQxW2bfq',
+                token_decimals: 9,
+                token_balance: bittBalance,
+                token_balance_usd: bittBalance * bittPriceUSD,
+                token_price_usd: bittPriceUSD,
+                token_price_sol: bittPriceSOL,
+                is_verified: true
+            };
+
             return {
                 status: 200,
-                message: 'SOL and USDT info retrieved successfully',
+                message: 'SOL, USDT and BITT info retrieved successfully',
                 data: {
                     wallet_address: walletAddress,
                     sol: solInfo,
-                    usdt: usdtInfo
+                    usdt: usdtInfo,
+                    bitt: bittInfo
                 }
             };
         } catch (error) {

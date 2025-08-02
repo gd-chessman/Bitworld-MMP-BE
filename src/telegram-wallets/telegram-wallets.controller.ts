@@ -518,10 +518,10 @@ export class TelegramWalletsController {
         }
     }
 
-    @Get('sol-usdt-info')
+    @Get('balance-info')
     @UseGuards(JwtAuthGuard)
-    @ApiOperation({ summary: 'Get SOL and USDT information for current wallet' })
-    @ApiResponse({ status: 200, description: 'SOL and USDT info retrieved successfully' })
+    @ApiOperation({ summary: 'Get SOL, USDT and BITT information for current wallet' })
+    @ApiResponse({ status: 200, description: 'SOL, USDT and BITT info retrieved successfully' })
     @ApiResponse({ status: 404, description: 'Wallet not found' })
     async getSolUsdtInfo(@Request() req) {
         try {
@@ -535,11 +535,11 @@ export class TelegramWalletsController {
             }
             return result;
         } catch (error) {
-            throw new HttpException({
-                status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
-                error: error.message,
-                message: 'Failed to get SOL and USDT info'
-            }, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
+                            throw new HttpException({
+                    status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+                    error: error.message,
+                    message: 'Failed to get SOL, USDT and BITT info'
+                }, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 
