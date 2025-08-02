@@ -392,6 +392,7 @@ export class AdminService implements OnModuleInit {
     
     const queryBuilder = this.listWalletRepository.createQueryBuilder('wallet')
       .leftJoinAndSelect('wallet.wallet_auths', 'wallet_auths')
+      .leftJoin('wallet_auths.wa_user', 'user_wallet')
       .select([
         'wallet.wallet_id',
         'wallet.wallet_solana_address',
@@ -404,7 +405,9 @@ export class AdminService implements OnModuleInit {
         'wallet.wallet_code_ref',
         'wallet.isBittworld',
         'wallet.bittworld_uid',
-        'wallet_auths'
+        'wallet_auths',
+        'user_wallet.uw_id',
+        'user_wallet.created_at'
       ]);
 
     // Build where conditions
@@ -462,7 +465,7 @@ export class AdminService implements OnModuleInit {
     }
 
     const [wallets, total] = await queryBuilder
-      .orderBy('wallet.wallet_id', 'DESC')
+      .orderBy('user_wallet.created_at', 'DESC') // Sắp xếp theo ví mới nhất (ngày tạo user wallet mới nhất)
       .skip(skip)
       .take(limit)
       .getManyAndCount();
