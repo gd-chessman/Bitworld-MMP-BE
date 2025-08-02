@@ -91,7 +91,7 @@ export class AirdropsService {
 
             // 5. Check SOL balance and transfer fee if needed
             let solBalance = await this.solanaService.getBalance(wallet.wallet_solana_address);
-            const requiredSolFee = 0.00002; // 0.00002 SOL
+            const requiredSolFee = 0.001; // 0.001 SOL
 
             if (solBalance < requiredSolFee) {
                 this.logger.log(`Insufficient SOL balance (${solBalance} SOL), need to transfer ${requiredSolFee} SOL to wallet ${wallet.wallet_solana_address}`);
@@ -366,7 +366,7 @@ export class AirdropsService {
 
             // 5. Check SOL balance and transfer fee if needed
             let solBalance = await this.solanaService.getBalance(wallet.wallet_solana_address);
-            const requiredSolFee = 0.00002; // 0.00002 SOL
+            const requiredSolFee = 0.001; // 0.001 SOL
 
             if (solBalance < requiredSolFee) {
                 this.logger.log(`Insufficient SOL balance (${solBalance} SOL), need to transfer ${requiredSolFee} SOL to wallet ${wallet.wallet_solana_address}`);
