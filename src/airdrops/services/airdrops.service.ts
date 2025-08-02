@@ -246,19 +246,36 @@ export class AirdropsService {
                 this.logger.error(`Pool ${savedPool.alp_id} creation failed due to onchain transaction failure`);
             }
 
-            return {
-                success: true,
-                message: success ? 'Pool created successfully' : 'Pool creation failed due to onchain transaction',
-                data: {
-                    poolId: savedPool.alp_id,
-                    name: savedPool.alp_name,
-                    slug: slug,
-                    logo: logoUrl,
-                    status: finalStatus,
-                    initialAmount: createPoolDto.initialAmount,
-                    transactionHash: transactionHash
-                }
-            };
+            if (success) {
+                return {
+                    success: true,
+                    message: 'Pool created successfully',
+                    data: {
+                        poolId: savedPool.alp_id,
+                        name: savedPool.alp_name,
+                        slug: slug,
+                        logo: logoUrl,
+                        status: finalStatus,
+                        initialAmount: createPoolDto.initialAmount,
+                        transactionHash: transactionHash
+                    }
+                };
+            } else {
+                // Nếu onchain transaction fail, trả về error 400
+                throw new BadRequestException({
+                    success: false,
+                    message: 'Pool creation failed due to onchain transaction',
+                    data: {
+                        poolId: savedPool.alp_id,
+                        name: savedPool.alp_name,
+                        slug: slug,
+                        logo: logoUrl,
+                        status: finalStatus,
+                        initialAmount: createPoolDto.initialAmount,
+                        transactionHash: transactionHash
+                    }
+                });
+            }
         }, this.LOCK_TTL * 1000); // Convert to milliseconds
     }
 
@@ -652,7 +669,22 @@ export class AirdropsService {
                     totalUserStaked += Number(pool.apl_volume);
                 }
 
-                // 6. Tạo thông tin pool với user info
+                // 6. Tính tổng volume của pool (volume ban đầu + tổng volume stake)
+                // Lấy tất cả stake records của pool này
+                const allPoolStakes = await this.airdropPoolJoinRepository.find({
+                    where: {
+                        apj_pool_id: pool.alp_id,
+                        apj_status: AirdropPoolJoinStatus.ACTIVE
+                    }
+                });
+
+                // Tính tổng volume stake
+                const totalStakeVolume = allPoolStakes.reduce((sum, stake) => sum + Number(stake.apj_volume), 0);
+                
+                // Tổng volume = volume ban đầu + tổng volume stake
+                const totalPoolVolume = Number(pool.apl_volume) + totalStakeVolume;
+
+                // 7. Tạo thông tin pool với user info
                 const poolInfo: PoolInfoDto = {
                     poolId: pool.alp_id,
                     name: pool.alp_name,
@@ -660,7 +692,7 @@ export class AirdropsService {
                     logo: pool.alp_logo || '',
                     describe: pool.alp_describe || '',
                     memberCount: pool.alp_member_num,
-                    totalVolume: Number(pool.apl_volume),
+                    totalVolume: totalPoolVolume,
                     creationDate: pool.apl_creation_date,
                     endDate: pool.apl_end_date,
                     status: pool.apl_status,
@@ -668,7 +700,7 @@ export class AirdropsService {
                     creatorBittworldUid: creatorWallet?.bittworld_uid || null
                 };
 
-                // 7. Thêm thông tin stake của user nếu có
+                // 8. Thêm thông tin stake của user nếu có
                 if (userStakes.length > 0 || isCreator) {
                     // Lấy ngày stake đầu tiên hoặc ngày tạo pool
                     const firstStakeDate = userStakes.length > 0 
@@ -941,8 +973,7 @@ export class AirdropsService {
         transactionId?: string
     ): Promise<string> {
         try {
-            this.logger.debug(`Starting token transfer with private key format check`);
-            this.logger.debug(`Private key format (first 20 chars): ${privateKey.substring(0, 20)}...`);
+
             
             // Decode private key
             const keypair = this.getKeypairFromPrivateKey(privateKey);
@@ -950,9 +981,7 @@ export class AirdropsService {
             // Create unique transaction to avoid duplication
             const uniqueId = transactionId || `${Date.now()}_${Math.random()}`;
             
-            this.logger.debug(`Token mint: ${tokenMint}`);
-            this.logger.debug(`Source wallet: ${keypair.publicKey.toString()}`);
-            this.logger.debug(`Destination wallet: ${destinationWallet}`);
+
             
             // Get or create token accounts
             const sourceTokenAccount = await this.getOrCreateATA(
@@ -971,21 +1000,46 @@ export class AirdropsService {
             this.logger.debug(`Destination token account: ${destinationTokenAccount.toString()}`);
             this.logger.debug(`Transfer amount: ${amount} (raw number)`);
 
-            // Get token decimals to understand the amount
-            const { getMint } = require('@solana/spl-token');
-            const mintInfo = await getMint(this.connection, new PublicKey(tokenMint));
-            this.logger.debug(`Token decimals: ${mintInfo.decimals}`);
-            this.logger.debug(`Transfer amount in tokens: ${amount / Math.pow(10, mintInfo.decimals)}`);
+            // Get token info to understand the amount
+            const tokenInfo = await this.getTokenInfo(tokenMint);
+            this.logger.debug(`Token decimals: ${tokenInfo.decimals}`);
+            this.logger.debug(`Transfer amount in tokens: ${amount / Math.pow(10, tokenInfo.decimals)}`);
             this.logger.debug(`Token mint: ${tokenMint}`);
 
-            // Create transfer instruction using SPL Token
-            const { createTransferInstruction } = require('@solana/spl-token');
-            const transferInstruction = createTransferInstruction(
-                sourceTokenAccount,
-                destinationTokenAccount,
-                keypair.publicKey,
-                amount
-            );
+            // Kiểm tra mint thuộc program nào để sử dụng đúng instruction
+            const accountInfo = await this.connection.getAccountInfo(new PublicKey(tokenMint));
+            if (!accountInfo) {
+                throw new Error(`Mint account does not exist: ${tokenMint}`);
+            }
+            
+            const SPL_TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+            const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+            
+            let transferInstruction;
+            
+            if (accountInfo.owner.toString() === SPL_TOKEN_PROGRAM_ID) {
+                // SPL Token Program
+                const { createTransferInstruction } = require('@solana/spl-token');
+                transferInstruction = createTransferInstruction(
+                    sourceTokenAccount,
+                    destinationTokenAccount,
+                    keypair.publicKey,
+                    amount
+                );
+            } else if (accountInfo.owner.toString() === TOKEN_2022_PROGRAM_ID) {
+                // Token-2022 Program
+                const { createTransferInstruction } = require('@solana/spl-token');
+                transferInstruction = createTransferInstruction(
+                    sourceTokenAccount,
+                    destinationTokenAccount,
+                    keypair.publicKey,
+                    amount,
+                    [],
+                    new PublicKey(TOKEN_2022_PROGRAM_ID) // Sử dụng Token-2022 program ID
+                );
+            } else {
+                throw new Error(`Unsupported token program: ${accountInfo.owner.toString()}`);
+            }
 
             // Create and send transaction
             const transaction = new Transaction().add(transferInstruction);
@@ -1003,28 +1057,86 @@ export class AirdropsService {
 
         } catch (error) {
             this.logger.error(`Error transferring token: ${error.message}`);
+            this.logger.error(`Error stack: ${error.stack}`);
             throw error;
         }
     }
 
     private async getTokenInfo(tokenMint: string): Promise<{ decimals: number; supply: number; mintAuthority: string | null }> {
         try {
-            const { getMint } = require('@solana/spl-token');
-            const mintInfo = await getMint(this.connection, new PublicKey(tokenMint));
+            // Kiểm tra account info trước
+            const accountInfo = await this.connection.getAccountInfo(new PublicKey(tokenMint));
             
-            this.logger.debug(`Token mint: ${tokenMint}`);
-            this.logger.debug(`Token decimals: ${mintInfo.decimals}`);
-            this.logger.debug(`Token supply: ${mintInfo.supply}`);
-            this.logger.debug(`Mint authority: ${mintInfo.mintAuthority?.toString() || 'null'}`);
+            if (!accountInfo) {
+                throw new BadRequestException(`Token mint address does not exist: ${tokenMint}`);
+            }
             
-            return {
-                decimals: mintInfo.decimals,
-                supply: Number(mintInfo.supply),
-                mintAuthority: mintInfo.mintAuthority?.toString() || null
-            };
+
+            
+            // Kiểm tra xem có phải SPL Token Program không
+            const SPL_TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+            const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+            
+            if (accountInfo.owner.toString() === SPL_TOKEN_PROGRAM_ID) {
+                // SPL Token Program
+                const { getMint } = require('@solana/spl-token');
+                const mintInfo = await getMint(this.connection, new PublicKey(tokenMint));
+                
+                
+                
+                return {
+                    decimals: mintInfo.decimals,
+                    supply: Number(mintInfo.supply),
+                    mintAuthority: mintInfo.mintAuthority?.toString() || null
+                };
+            } else if (accountInfo.owner.toString() === TOKEN_2022_PROGRAM_ID) {
+                // Token-2022 Program
+                this.logger.warn(`Token mint ${tokenMint} is Token-2022. Using default decimals: 9`);
+                
+                // Thử lấy thông tin từ account data
+                try {
+                    // Token-2022 có cấu trúc tương tự SPL Token
+                    const { MintLayout } = require('@solana/spl-token');
+                    const mintInfo = MintLayout.decode(accountInfo.data);
+                    
+
+                    
+                    return {
+                        decimals: mintInfo.decimals,
+                        supply: Number(mintInfo.supply),
+                        mintAuthority: mintInfo.mintAuthority?.toString() || null
+                    };
+                } catch (decodeError) {
+                    this.logger.warn(`Failed to decode Token-2022 mint data: ${decodeError.message}`);
+                    
+                    // Fallback: sử dụng decimals mặc định là 9
+                    return {
+                        decimals: 9,
+                        supply: 0,
+                        mintAuthority: null
+                    };
+                }
+            } else {
+                // Program khác (Metaplex, etc.)
+                this.logger.warn(`Token mint ${tokenMint} is not owned by SPL Token or Token-2022 Program. Owner: ${accountInfo.owner.toString()}`);
+                
+                // Tạm thời sử dụng decimals mặc định là 9
+                return {
+                    decimals: 9,
+                    supply: 0,
+                    mintAuthority: null
+                };
+            }
             
         } catch (error) {
             this.logger.error(`Error getting token info: ${error.message}`);
+            this.logger.error(`Error stack: ${error.stack}`);
+            
+            // Nếu là TokenInvalidAccountOwnerError, trả về lỗi rõ ràng hơn
+            if (error.message.includes('TokenInvalidAccountOwnerError')) {
+                throw new BadRequestException(`Invalid token mint address: ${tokenMint}. This address is not a valid SPL Token mint.`);
+            }
+            
             throw error;
         }
     }
@@ -1034,13 +1146,8 @@ export class AirdropsService {
             // Get token info including decimals
             const tokenInfo = await this.getTokenInfo(tokenMint);
             
-            this.logger.debug(`Original token amount: ${tokenAmount}`);
-            
             // Calculate raw units based on decimals
             const rawUnits = tokenAmount * Math.pow(10, tokenInfo.decimals);
-            
-            this.logger.debug(`Calculated raw units: ${rawUnits}`);
-            this.logger.debug(`Equivalent token amount: ${rawUnits / Math.pow(10, tokenInfo.decimals)}`);
             
             return rawUnits;
             
@@ -1056,22 +1163,73 @@ export class AirdropsService {
         ownerAddress: PublicKey
     ): Promise<PublicKey> {
         try {
-            this.logger.debug(`Getting ATA for mint: ${mint.toString()}, owner: ${ownerAddress.toString()}`);
+
             
-            const { getOrCreateAssociatedTokenAccount } = require('@solana/spl-token');
+            // Kiểm tra mint thuộc program nào
+            const accountInfo = await this.connection.getAccountInfo(mint);
+            if (!accountInfo) {
+                throw new Error(`Mint account does not exist: ${mint.toString()}`);
+            }
             
-            const tokenAccount = await getOrCreateAssociatedTokenAccount(
-                this.connection,
-                owner,
-                mint,
-                ownerAddress
-            );
+            const SPL_TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+            const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
             
-            this.logger.debug(`ATA address: ${tokenAccount.address.toString()}`);
-            return tokenAccount.address;
+            if (accountInfo.owner.toString() === SPL_TOKEN_PROGRAM_ID) {
+                // SPL Token Program
+                const { getOrCreateAssociatedTokenAccount } = require('@solana/spl-token');
+                
+                const tokenAccount = await getOrCreateAssociatedTokenAccount(
+                    this.connection,
+                    owner,
+                    mint,
+                    ownerAddress
+                );
+                
+
+                return tokenAccount.address;
+                
+            } else if (accountInfo.owner.toString() === TOKEN_2022_PROGRAM_ID) {
+                // Token-2022 Program
+                this.logger.warn(`Using Token-2022 for mint: ${mint.toString()}`);
+                
+                // Tạm thời sử dụng SPL Token method với Token-2022 program ID
+                try {
+                    const { getOrCreateAssociatedTokenAccount } = require('@solana/spl-token');
+                    
+                    const tokenAccount = await getOrCreateAssociatedTokenAccount(
+                        this.connection,
+                        owner,
+                        mint,
+                        ownerAddress,
+                        false,
+                        new PublicKey(TOKEN_2022_PROGRAM_ID) // Sử dụng Token-2022 program ID
+                    );
+                    
+
+                    return tokenAccount.address;
+                } catch (error) {
+                    this.logger.error(`Failed to create Token-2022 ATA: ${error.message}`);
+                    
+                    // Fallback: Sử dụng getAssociatedTokenAddress để lấy address
+                    const { getAssociatedTokenAddress } = require('@solana/spl-token');
+                    const ataAddress = await getAssociatedTokenAddress(
+                        mint,
+                        ownerAddress,
+                        false,
+                        new PublicKey(TOKEN_2022_PROGRAM_ID)
+                    );
+                    
+
+                    return ataAddress;
+                }
+                
+            } else {
+                throw new Error(`Unsupported token program: ${accountInfo.owner.toString()}`);
+            }
             
         } catch (error) {
             this.logger.error(`Error creating ATA: ${error.message}`);
+            this.logger.error(`Error stack: ${error.stack}`);
             throw error;
         }
     }
