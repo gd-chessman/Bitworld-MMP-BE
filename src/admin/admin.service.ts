@@ -29,6 +29,7 @@ import { AirdropPoolJoin, AirdropPoolJoinStatus } from '../airdrops/entities/air
 import { AirdropPoolResponseDto, AirdropPoolListResponseDto } from './dto/airdrop-pool-response.dto';
 import { AirdropPoolStatsResponseDto } from './dto/airdrop-pool-stats-response.dto';
 import { AirdropPoolDetailResponseDto, AirdropPoolTransactionDto, AirdropPoolMemberDto } from './dto/airdrop-pool-detail-response.dto';
+import { AirdropStakingLeaderboardResponseDto } from './dto/airdrop-staking-leaderboard.dto';
 
 @Injectable()
 export class AdminService implements OnModuleInit {
@@ -2729,6 +2730,147 @@ export class AdminService implements OnModuleInit {
     transactions.sort((a, b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime());
 
     return transactions;
+  }
+
+  async getAirdropPoolsStakingLeaderboard(
+    page: number = 1,
+    limit: number = 20
+  ): Promise<AirdropStakingLeaderboardResponseDto> {
+    try {
+      // Get all active pools
+      const allPools = await this.airdropListPoolRepository
+        .createQueryBuilder('pool')
+        .leftJoinAndSelect('pool.originator', 'wallet')
+        .where('pool.apl_status = :status', { status: AirdropPoolStatus.ACTIVE })
+        .getMany();
+
+      const poolsLeaderboard: Array<{
+        poolId: number;
+        poolName: string;
+        poolSlug: string;
+        totalPoolVolume: number;
+        memberCount: number;
+        topStaker: {
+          walletId: number;
+          solanaAddress: string;
+          nickName?: string;
+          isBittworld: boolean;
+          bittworldUid?: string | null;
+          stakedVolume: number;
+          percentageOfPool: number;
+          isCreator: boolean;
+          stakingDate: Date;
+        };
+      }> = [];
+
+      // Process each pool
+      for (const pool of allPools) {
+        // Get all stakes in this pool
+        const poolStakes = await this.airdropPoolJoinRepository
+          .createQueryBuilder('stake')
+          .leftJoinAndSelect('stake.member', 'wallet')
+          .where('stake.apj_pool_id = :poolId', { poolId: pool.alp_id })
+          .andWhere('stake.apj_status = :status', { status: AirdropPoolJoinStatus.ACTIVE })
+          .getMany();
+
+        // Calculate total pool volume
+        const totalStakeVolume = poolStakes.reduce((sum, stake) => sum + Number(stake.apj_volume), 0);
+        const totalPoolVolume = Number(pool.apl_volume) + totalStakeVolume;
+
+        // Create entries for this pool
+        const poolEntries: Array<{
+          walletId: number;
+          solanaAddress: string;
+          nickName?: string;
+          isBittworld: boolean;
+          bittworldUid?: string | null;
+          stakedVolume: number;
+          percentageOfPool: number;
+          isCreator: boolean;
+          stakingDate: Date;
+        }> = [];
+
+        // Add pool creator
+        if (pool.originator) {
+          poolEntries.push({
+            walletId: pool.alp_originator,
+            solanaAddress: pool.originator.wallet_solana_address,
+            nickName: pool.originator.wallet_nick_name,
+            isBittworld: pool.originator.isBittworld,
+            bittworldUid: pool.originator.isBittworld ? pool.originator.bittworld_uid || null : null,
+            stakedVolume: Number(pool.apl_volume),
+            percentageOfPool: totalPoolVolume > 0 ? (Number(pool.apl_volume) / totalPoolVolume) * 100 : 0,
+            isCreator: true,
+            stakingDate: pool.apl_creation_date
+          });
+        }
+
+        // Add other stakers
+        for (const stake of poolStakes) {
+          const wallet = stake.member;
+          poolEntries.push({
+            walletId: stake.apj_member,
+            solanaAddress: wallet?.wallet_solana_address || '',
+            nickName: wallet?.wallet_nick_name,
+            isBittworld: wallet?.isBittworld || false,
+            bittworldUid: wallet?.isBittworld ? wallet?.bittworld_uid || null : null,
+            stakedVolume: Number(stake.apj_volume),
+            percentageOfPool: totalPoolVolume > 0 ? (Number(stake.apj_volume) / totalPoolVolume) * 100 : 0,
+            isCreator: false,
+            stakingDate: stake.apj_stake_date
+          });
+        }
+
+        // Sort by staked volume and get top staker
+        poolEntries.sort((a, b) => b.stakedVolume - a.stakedVolume);
+        const topStaker = poolEntries[0];
+
+        if (topStaker) {
+          poolsLeaderboard.push({
+            poolId: pool.alp_id,
+            poolName: pool.alp_name,
+            poolSlug: pool.alp_slug,
+            totalPoolVolume,
+            memberCount: pool.alp_member_num,
+            topStaker
+          });
+        }
+      }
+
+      // Sort pools by top staker's volume (descending)
+      poolsLeaderboard.sort((a, b) => b.topStaker.stakedVolume - a.topStaker.stakedVolume);
+
+      // Calculate pagination
+      const total = poolsLeaderboard.length;
+      const totalPages = Math.ceil(total / limit);
+      const startIndex = (page - 1) * limit;
+      const endIndex = startIndex + limit;
+      const paginatedData = poolsLeaderboard.slice(startIndex, endIndex);
+
+      // Transform to response format
+      const rankedData = paginatedData.map((poolData, index) => ({
+        rank: startIndex + index + 1,
+        poolId: poolData.poolId,
+        poolName: poolData.poolName,
+        poolSlug: poolData.poolSlug,
+        totalPoolVolume: poolData.totalPoolVolume,
+        memberCount: poolData.memberCount,
+        ...poolData.topStaker
+      }));
+
+      return {
+        success: true,
+        message: 'Pools leaderboard retrieved successfully',
+        data: rankedData,
+        total,
+        page,
+        limit,
+        totalPages
+      };
+
+    } catch (error) {
+      throw new Error(`Error getting pools staking leaderboard: ${error.message}`);
+    }
   }
 
   private async getAirdropPoolMembers(poolId: number): Promise<AirdropPoolMemberDto[]> {

@@ -25,6 +25,7 @@ import { SwapSettingDto, UpdateSwapSettingDto } from './dto/swap-setting.dto';
 import { AirdropPoolListResponseDto, AirdropPoolResponseDto } from './dto/airdrop-pool-response.dto';
 import { AirdropPoolStatsResponseDto } from './dto/airdrop-pool-stats-response.dto';
 import { AirdropPoolDetailResponseDto } from './dto/airdrop-pool-detail-response.dto';
+import { AirdropStakingLeaderboardResponseDto } from './dto/airdrop-staking-leaderboard.dto';
 import { ConflictException, HttpException, HttpStatus, UnauthorizedException } from '@nestjs/common';
 
 @ApiTags('admin')
@@ -614,5 +615,16 @@ export class AdminController {
     @Param('idOrSlug') idOrSlug: string
   ): Promise<AirdropPoolDetailResponseDto> {
     return this.adminService.getAirdropPoolDetailByIdOrSlug(idOrSlug);
+  }
+
+  @Get('airdrop-pools/leaderboard')
+  @UseGuards(JwtAuthAdminGuard)
+  @ApiOperation({ summary: 'Get airdrop pools staking leaderboard' })
+  @ApiResponse({ status: 200, description: 'Pools leaderboard retrieved successfully', type: AirdropStakingLeaderboardResponseDto })
+  async getAirdropPoolsStakingLeaderboard(
+    @Query('page', new ParseIntPipe({ optional: true })) page: number = 1,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 20
+  ): Promise<AirdropStakingLeaderboardResponseDto> {
+    return this.adminService.getAirdropPoolsStakingLeaderboard(page, limit);
   }
 }
