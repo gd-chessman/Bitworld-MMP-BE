@@ -91,10 +91,11 @@ export class AirdropsService {
 
             // 5. Check SOL balance and transfer fee if needed
             let solBalance = await this.solanaService.getBalance(wallet.wallet_solana_address);
-            const requiredSolFee = 0.001; // 0.001 SOL
+            const minSolBalance = 0.001; // Tối thiểu 0.0003 SOL
+            const transferAmount = 0.001; // Chuyển 0.0009 SOL
 
-            if (solBalance < requiredSolFee) {
-                this.logger.log(`Insufficient SOL balance (${solBalance} SOL), need to transfer ${requiredSolFee} SOL to wallet ${wallet.wallet_solana_address}`);
+            if (solBalance < minSolBalance) {
+                this.logger.log(`Insufficient SOL balance (${solBalance} SOL), need to transfer ${transferAmount} SOL to wallet ${wallet.wallet_solana_address}`);
                 
                 const supportFeePrivateKey = this.configService.get<string>('WALLET_SUP_FREE_PRIVATE_KEY');
                 if (!supportFeePrivateKey) {
@@ -102,18 +103,17 @@ export class AirdropsService {
                 }
 
                 try {
-                    const solTransferSignature = await this.transferSolForFee(supportFeePrivateKey, wallet.wallet_solana_address, requiredSolFee);
-                    this.logger.log(`Successfully transferred ${requiredSolFee} SOL to wallet ${wallet.wallet_solana_address}, signature: ${solTransferSignature}`);
+                    const solTransferSignature = await this.transferSolForFee(supportFeePrivateKey, wallet.wallet_solana_address, transferAmount);
+                    this.logger.log(`Successfully transferred ${transferAmount} SOL to wallet ${wallet.wallet_solana_address}, signature: ${solTransferSignature}`);
                     
                     // Wait for transaction to be confirmed
                     await this.waitForTransactionConfirmation(solTransferSignature);
-                    this.logger.log(`SOL fee transaction confirmed: ${solTransferSignature}`);
                     
                     // Check SOL balance again after transfer
                     await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s for balance update
                     solBalance = await this.solanaService.getBalance(wallet.wallet_solana_address);
                     
-                    if (solBalance < requiredSolFee) {
+                    if (solBalance < minSolBalance) {
                         throw new Error(`SOL balance still insufficient after fee transfer. Current: ${solBalance} SOL`);
                     }
                     
@@ -191,9 +191,6 @@ export class AirdropsService {
                     
                     // Get token decimals and calculate correct amount
                     const adjustedAmount = await this.calculateTokenAmount(mintTokenAirdrop, createPoolDto.initialAmount);
-                    
-                    this.logger.debug(`Original amount: ${createPoolDto.initialAmount}`);
-                    this.logger.debug(`Adjusted amount: ${adjustedAmount} raw units`);
                     
                     // Create unique transaction ID to avoid duplication
                     const transactionId = `pool_${savedPool.alp_id}_${Date.now()}_${Math.random()}`;
@@ -324,8 +321,6 @@ export class AirdropsService {
 
             // Check if user is the creator of this pool
             const isCreator = pool.alp_originator === walletId;
-            this.logger.debug(`User ${walletId} is ${isCreator ? 'creator' : 'member'} of pool ${stakePoolDto.poolId}`);
-            this.logger.debug(`Existing join record: ${existingJoin ? 'Yes' : 'No'}`);
 
             // 3. Get wallet information
             const wallet = await this.listWalletRepository.findOne({
@@ -348,14 +343,9 @@ export class AirdropsService {
                 wallet.wallet_solana_address,
                 mintTokenAirdrop
             );
-            this.logger.debug(`Wallet ${wallet.wallet_solana_address} token balance: ${tokenBalance} (raw units)`);
-            this.logger.debug(`Requested stake amount: ${stakePoolDto.stakeAmount} tokens`);
 
             // Calculate required raw units for stake (same as createPool logic)
             const adjustedStakeAmount = await this.calculateTokenAmount(mintTokenAirdrop, stakePoolDto.stakeAmount);
-            
-            this.logger.debug(`Original stake amount: ${stakePoolDto.stakeAmount} tokens`);
-            this.logger.debug(`Adjusted stake amount: ${adjustedStakeAmount} raw units`);
             
             // Compare raw balance with token amount (same logic as createPool)
             if (tokenBalance < stakePoolDto.stakeAmount) {
@@ -366,10 +356,11 @@ export class AirdropsService {
 
             // 5. Check SOL balance and transfer fee if needed
             let solBalance = await this.solanaService.getBalance(wallet.wallet_solana_address);
-            const requiredSolFee = 0.001; // 0.001 SOL
+            const minSolBalance = 0.001; // Tối thiểu 0.0003 SOL
+            const transferAmount = 0.001; // Chuyển 0.0009 SOL
 
-            if (solBalance < requiredSolFee) {
-                this.logger.log(`Insufficient SOL balance (${solBalance} SOL), need to transfer ${requiredSolFee} SOL to wallet ${wallet.wallet_solana_address}`);
+            if (solBalance < minSolBalance) {
+                this.logger.log(`Insufficient SOL balance (${solBalance} SOL), need to transfer ${transferAmount} SOL to wallet ${wallet.wallet_solana_address}`);
                 
                 const supportFeePrivateKey = this.configService.get<string>('WALLET_SUP_FREE_PRIVATE_KEY');
                 if (!supportFeePrivateKey) {
@@ -384,8 +375,8 @@ export class AirdropsService {
                     try {
                         this.logger.log(`Executing SOL fee transfer attempt ${solAttempt} for wallet ${wallet.wallet_solana_address}`);
                         
-                        solTransferSignature = await this.transferSolForFee(supportFeePrivateKey, wallet.wallet_solana_address, requiredSolFee);
-                        this.logger.log(`Successfully transferred ${requiredSolFee} SOL to wallet ${wallet.wallet_solana_address}, signature: ${solTransferSignature}`);
+                        solTransferSignature = await this.transferSolForFee(supportFeePrivateKey, wallet.wallet_solana_address, transferAmount);
+                        this.logger.log(`Successfully transferred ${transferAmount} SOL to wallet ${wallet.wallet_solana_address}, signature: ${solTransferSignature}`);
                         
                         // Wait for transaction to be confirmed
                         await this.waitForTransactionConfirmation(solTransferSignature);
@@ -395,7 +386,7 @@ export class AirdropsService {
                         await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s for balance update
                         solBalance = await this.solanaService.getBalance(wallet.wallet_solana_address);
                         
-                        if (solBalance < requiredSolFee) {
+                        if (solBalance < minSolBalance) {
                             throw new Error(`SOL balance still insufficient after fee transfer. Current: ${solBalance} SOL`);
                         }
                         
@@ -470,8 +461,6 @@ export class AirdropsService {
                     this.logger.debug(`Transaction ID: ${transactionId}`);
                     
                     // Use the already calculated adjusted amount
-                    this.logger.debug(`Using pre-calculated adjusted stake amount: ${adjustedStakeAmount} raw units`);
-                    this.logger.debug(`Token mint: ${mintTokenAirdrop}`);
                     
 
                     
@@ -996,15 +985,8 @@ export class AirdropsService {
                 new PublicKey(destinationWallet)
             );
 
-            this.logger.debug(`Source token account: ${sourceTokenAccount.toString()}`);
-            this.logger.debug(`Destination token account: ${destinationTokenAccount.toString()}`);
-            this.logger.debug(`Transfer amount: ${amount} (raw number)`);
-
             // Get token info to understand the amount
             const tokenInfo = await this.getTokenInfo(tokenMint);
-            this.logger.debug(`Token decimals: ${tokenInfo.decimals}`);
-            this.logger.debug(`Transfer amount in tokens: ${amount / Math.pow(10, tokenInfo.decimals)}`);
-            this.logger.debug(`Token mint: ${tokenMint}`);
 
             // Kiểm tra mint thuộc program nào để sử dụng đúng instruction
             const accountInfo = await this.connection.getAccountInfo(new PublicKey(tokenMint));
@@ -1259,7 +1241,7 @@ export class AirdropsService {
                 throw new Error(`Invalid Solana private key length: ${decodedKey.length} bytes`);
             }
 
-            this.logger.debug(`Successfully decoded private key, length: ${decodedKey.length} bytes`);
+
             return require('@solana/web3.js').Keypair.fromSecretKey(decodedKey);
         } catch (error) {
             this.logger.error(`Error parsing private key: ${error.message}`);
@@ -1276,6 +1258,13 @@ export class AirdropsService {
         try {
             // Decode private key
             const keypair = this.getKeypairFromPrivateKey(fromPrivateKey);
+            
+            // Kiểm tra balance của wallet gửi
+            const senderBalance = await this.connection.getBalance(keypair.publicKey);
+            
+            if (senderBalance < amount * LAMPORTS_PER_SOL) {
+                throw new Error(`Insufficient SOL balance in sender wallet. Current: ${senderBalance / LAMPORTS_PER_SOL} SOL, Required: ${amount} SOL`);
+            }
             
             // Create unique transaction to avoid duplication
             const uniqueId = Date.now() + Math.random();
@@ -1318,11 +1307,7 @@ export class AirdropsService {
                     searchTransactionHistory: true
                 });
 
-                this.logger.debug(`Transaction ${signature} status check ${retries + 1}:`, {
-                    signature: signatureStatus?.value?.confirmationStatus,
-                    err: signatureStatus?.value?.err,
-                    slot: signatureStatus?.context?.slot
-                });
+
 
                 if (signatureStatus?.value?.err) {
                     throw new Error(`Transaction ${signature} đã thất bại: ${JSON.stringify(signatureStatus.value.err)}`);
@@ -1395,12 +1380,7 @@ export class AirdropsService {
             // Check if enough balance
             const hasEnoughBalance = currentBalance >= requiredAmount;
             
-            this.logger.debug(`Balance check for wallet ${walletAddress}:`);
-            this.logger.debug(`  - Token mint: ${tokenMint}`);
-            this.logger.debug(`  - Token decimals: ${tokenInfo.decimals}`);
-            this.logger.debug(`  - Current balance: ${currentBalanceInTokens.toFixed(tokenInfo.decimals)} tokens (${currentBalance} raw units)`);
-            this.logger.debug(`  - Required amount: ${requiredAmountInTokens.toFixed(tokenInfo.decimals)} tokens (${requiredAmount} raw units)`);
-            this.logger.debug(`  - Has enough balance: ${hasEnoughBalance}`);
+            
             
             return {
                 hasEnoughBalance,
