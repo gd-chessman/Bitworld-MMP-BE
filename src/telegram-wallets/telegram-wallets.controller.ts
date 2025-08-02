@@ -518,6 +518,31 @@ export class TelegramWalletsController {
         }
     }
 
+    @Get('sol-usdt-info')
+    @UseGuards(JwtAuthGuard)
+    @ApiOperation({ summary: 'Get SOL and USDT information for current wallet' })
+    @ApiResponse({ status: 200, description: 'SOL and USDT info retrieved successfully' })
+    @ApiResponse({ status: 404, description: 'Wallet not found' })
+    async getSolUsdtInfo(@Request() req) {
+        try {
+            const result = await this.telegramWalletsService.getSolUsdtInfo(req.user);
+            if (result.status === 404) {
+                throw new HttpException({
+                    status: HttpStatus.NOT_FOUND,
+                    error: result.message,
+                    message: 'Wallet not found'
+                }, HttpStatus.NOT_FOUND);
+            }
+            return result;
+        } catch (error) {
+            throw new HttpException({
+                status: error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+                error: error.message,
+                message: 'Failed to get SOL and USDT info'
+            }, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
     // @Get('get-info/:id_or_private_key')
     // @ApiOperation({
     //     summary: 'Lấy thông tin ví theo wallet_id hoặc private key',

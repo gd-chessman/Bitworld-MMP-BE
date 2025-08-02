@@ -2578,4 +2578,94 @@ export class TelegramWalletsService {
             };
         }
     }
+
+    async getSolUsdtInfo(user: any) {
+        try {
+            const { wallet_id } = user;
+            const wallet = await this.listWalletRepository.findOne({
+                where: { wallet_id }
+            });
+
+            if (!wallet) {
+                return {
+                    status: 404,
+                    message: 'Wallet not found'
+                };
+            }
+
+            const walletAddress = wallet.wallet_solana_address;
+            const USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
+            const SOL_MINT = 'So11111111111111111111111111111111111111112';
+
+            // Get SOL balance
+            let solBalance = 0;
+            try {
+                const solBalanceInfo = await this.getWalletBalance(walletAddress);
+                if (solBalanceInfo.status === 200 && solBalanceInfo.data) {
+                    solBalance = solBalanceInfo.data.sol_balance || 0;
+                }
+            } catch (error) {
+                this.logger.error(`Error fetching SOL balance: ${error.message}`);
+            }
+
+            // Get USDT balance
+            let usdtBalance = 0;
+            try {
+                usdtBalance = await this.solanaService.getTokenBalance(walletAddress, USDT_MINT);
+            } catch (error) {
+                this.logger.error(`Error fetching USDT balance: ${error.message}`);
+            }
+
+            // Get token prices
+            const tokenPrices = await this.solanaService.getTokenPricesInRealTime([SOL_MINT, USDT_MINT]);
+            
+            const solPriceUSD = tokenPrices?.get(SOL_MINT)?.priceUSD || 0;
+            const solPriceSOL = 1; // SOL price in SOL is always 1
+            const usdtPriceUSD = tokenPrices?.get(USDT_MINT)?.priceUSD || 1;
+            const usdtPriceSOL = tokenPrices?.get(USDT_MINT)?.priceSOL || 0;
+
+            const solInfo = {
+                token_address: SOL_MINT,
+                token_name: 'Solana',
+                token_symbol: 'SOL',
+                token_logo_url: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
+                token_decimals: 9,
+                token_balance: solBalance,
+                token_balance_usd: solBalance * solPriceUSD,
+                token_price_usd: solPriceUSD,
+                token_price_sol: solPriceSOL,
+                is_verified: true
+            };
+
+            const usdtInfo = {
+                token_address: USDT_MINT,
+                token_name: 'USDT',
+                token_symbol: 'USDT',
+                token_logo_url: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.svg',
+                token_decimals: 6,
+                token_balance: usdtBalance,
+                token_balance_usd: usdtBalance * usdtPriceUSD,
+                token_price_usd: usdtPriceUSD,
+                token_price_sol: usdtPriceSOL,
+                is_verified: true
+            };
+
+            return {
+                status: 200,
+                message: 'SOL and USDT info retrieved successfully',
+                data: {
+                    wallet_address: walletAddress,
+                    sol: solInfo,
+                    usdt: usdtInfo
+                }
+            };
+        } catch (error) {
+            this.logger.error(`Error getting SOL and USDT info: ${error.message}`, error.stack);
+            return {
+                status: 500,
+                message: `Error getting SOL and USDT info: ${error.message}`,
+                data: null
+            };
+        }
+    }
 }
