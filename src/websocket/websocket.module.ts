@@ -14,6 +14,7 @@ import { TokenTxsGateway } from './token-txs.gateway';
 import { TokenInfoGateway } from './token-info.gateway';
 import { SharedWebSocketService } from './services/shared-websocket.service';
 import { SolanaTrackerWebSocketService } from './hooks/solana-tracker-websocket.service';
+import { WalletBalanceGateway } from './wallet-balance.gateway';
 
 @Module({
     imports: [
@@ -31,7 +32,8 @@ import { SolanaTrackerWebSocketService } from './hooks/solana-tracker-websocket.
         TokenTxsGateway,
         TokenInfoGateway,
         SharedWebSocketService,
-        SolanaTrackerWebSocketService
+        SolanaTrackerWebSocketService,
+        WalletBalanceGateway
     ],
     exports: [
         TokenGateway,
@@ -39,7 +41,8 @@ import { SolanaTrackerWebSocketService } from './hooks/solana-tracker-websocket.
         TradeGateway,
         TokenTxsGateway,
         TokenInfoGateway,
-        SharedWebSocketService
+        SharedWebSocketService,
+        WalletBalanceGateway
     ]
 })
 export class WebSocketModule { } 
