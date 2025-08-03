@@ -221,8 +221,9 @@ export class SwapService {
 
       const savedOrder = await this.swapOrderRepository.save(swapOrder);
 
-      // 8. Kiểm tra balance của user
+      // 8. Kiểm tra balance của user và tự động điều chỉnh nếu cần
       let hasBalance = false;
+      let adjustedInputAmount = createSwapDto.input_amount;
 
       switch (createSwapDto.swap_type) {
         case SwapOrderType.USDT_TO_SOL:
@@ -241,9 +242,23 @@ export class SwapService {
           break;
         
         case SwapOrderType.SOL_TO_USDT:
-          // Kiểm tra balance SOL
+          // Kiểm tra balance SOL và tự động điều chỉnh nếu cần
           const balance = await this.connection.getBalance(userKeypair.publicKey);
-          hasBalance = balance >= createSwapDto.input_amount * 1e9; // Convert SOL to lamports
+          const balanceInSol = balance / 1e9; // Convert lamports to SOL
+          const transactionFee = 0.00001; // ~0.00001 SOL cho phí transaction
+          const requiredAmount = createSwapDto.input_amount + transactionFee;
+          
+          if (balanceInSol >= requiredAmount) {
+            hasBalance = true;
+          } else {
+            // Tự động điều chỉnh số tiền SOL để trừ phí transaction
+            const adjustedSolAmount = balanceInSol - transactionFee;
+            if (adjustedSolAmount > 0) {
+              adjustedInputAmount = adjustedSolAmount;
+              hasBalance = true;
+              this.logger.log(`Adjusted SOL swap amount from ${createSwapDto.input_amount} to ${adjustedSolAmount} SOL to account for transaction fee`);
+            }
+          }
           break;
       }
 
@@ -317,7 +332,7 @@ export class SwapService {
             // SOL sang USDT: User gửi SOL, nhận USDT
             
             // Gửi SOL từ user đến pool
-            const inputSolLamports = Math.floor(createSwapDto.input_amount * 1e9);
+            const inputSolLamports = Math.floor(adjustedInputAmount * 1e9);
             transaction.add(
               SystemProgram.transfer({
                 fromPubkey: userKeypair.publicKey,
@@ -365,7 +380,7 @@ export class SwapService {
               )
             );
             
-            this.logger.log(`SOL to USDT swap: User sent ${createSwapDto.input_amount} SOL, will receive ${outputAmount} USDT (fee: ${feeAmount} USDT, ${swapFeePercent}%)`);
+            this.logger.log(`SOL to USDT swap: User sent ${adjustedInputAmount} SOL, will receive ${outputAmount} USDT (fee: ${feeAmount} USDT, ${swapFeePercent}%)`);
             
             break;
         }
