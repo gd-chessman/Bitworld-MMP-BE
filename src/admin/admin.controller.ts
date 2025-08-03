@@ -626,8 +626,9 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Pools leaderboard retrieved successfully', type: AirdropStakingLeaderboardResponseDto })
   async getAirdropPoolsStakingLeaderboard(
     @Query('page', new ParseIntPipe({ optional: true })) page: number = 1,
-    @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 20
+    @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 20,
+    @Query('minVolume', new ParseIntPipe({ optional: true })) minVolume?: number
   ): Promise<AirdropStakingLeaderboardResponseDto> {
-    return this.adminService.getAirdropPoolsStakingLeaderboard(page, limit);
+    return this.adminService.getAirdropPoolsStakingLeaderboard(page, limit, minVolume);
   }
 }

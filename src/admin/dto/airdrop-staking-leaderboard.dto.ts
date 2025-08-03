@@ -5,6 +5,7 @@ export class AirdropStakingLeaderboardEntryDto {
   poolSlug: string;
   totalPoolVolume: number;
   memberCount: number;
+  volumeTier: string;
   walletId: number;
   solanaAddress: string;
   nickName?: string;

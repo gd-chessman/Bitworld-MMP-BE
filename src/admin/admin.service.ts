@@ -2742,7 +2742,8 @@ export class AdminService implements OnModuleInit {
 
   async getAirdropPoolsStakingLeaderboard(
     page: number = 1,
-    limit: number = 20
+    limit: number = 20,
+    minVolume?: number
   ): Promise<AirdropStakingLeaderboardResponseDto> {
     try {
       // Get all active pools
@@ -2752,7 +2753,7 @@ export class AdminService implements OnModuleInit {
         .where('pool.apl_status = :status', { status: AirdropPoolStatus.ACTIVE })
         .getMany();
 
-      const poolsLeaderboard: Array<{
+      let poolsLeaderboard: Array<{
         poolId: number;
         poolName: string;
         poolSlug: string;
@@ -2845,6 +2846,13 @@ export class AdminService implements OnModuleInit {
         }
       }
 
+      // Filter by minimum volume if specified
+      if (minVolume !== undefined && minVolume > 0) {
+        poolsLeaderboard = poolsLeaderboard.filter(pool => 
+          pool.topStaker.stakedVolume >= minVolume
+        );
+      }
+
       // Sort pools by top staker's volume (descending)
       poolsLeaderboard.sort((a, b) => b.topStaker.stakedVolume - a.topStaker.stakedVolume);
 
@@ -2855,6 +2863,14 @@ export class AdminService implements OnModuleInit {
       const endIndex = startIndex + limit;
       const paginatedData = poolsLeaderboard.slice(startIndex, endIndex);
 
+      // Helper function to determine volume tier
+      const getVolumeTier = (volume: number): string => {
+        if (volume >= 30000000) return 'V7'; // Trên 30 triệu
+        if (volume >= 20000000) return 'V6'; // 20-30 triệu
+        if (volume >= 10000000) return 'V5'; // 10-20 triệu
+        return 'V4'; // Dưới 10 triệu
+      };
+
       // Transform to response format
       const rankedData = paginatedData.map((poolData, index) => ({
         rank: startIndex + index + 1,
@@ -2863,6 +2879,7 @@ export class AdminService implements OnModuleInit {
         poolSlug: poolData.poolSlug,
         totalPoolVolume: poolData.totalPoolVolume,
         memberCount: poolData.memberCount,
+        volumeTier: getVolumeTier(poolData.topStaker.stakedVolume),
         ...poolData.topStaker
       }));
 
