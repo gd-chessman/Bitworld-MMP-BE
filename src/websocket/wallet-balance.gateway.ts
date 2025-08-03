@@ -4,6 +4,7 @@ import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Connection, PublicKey, Commitment, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { SolanaPriceCacheService } from '../solana/solana-price-cache.service';
 
 @WebSocketGateway({
   cors: {
@@ -27,7 +28,10 @@ export class WalletBalanceGateway implements OnGatewayConnection, OnGatewayDisco
   private lastProcessedSlot: number = 0;
   private readonly commitment: Commitment = 'confirmed';
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly solanaPriceCacheService: SolanaPriceCacheService
+  ) {
     // Kết nối RPC cho việc lấy dữ liệu ban đầu
     const rpcUrl = this.configService.get<string>('SOLANA_RPC_URL');
     if (!rpcUrl) {
@@ -207,6 +211,28 @@ export class WalletBalanceGateway implements OnGatewayConnection, OnGatewayDisco
     }
   }
 
+  private async getTokenPrices() {
+    try {
+      // Lấy giá SOL/USD
+      const solPrice = await this.solanaPriceCacheService.getSOLPriceInUSD();
+      
+      // USDT luôn = 1 USD
+      const usdtPrice = 1;
+      
+      return {
+        sol: solPrice,
+        usdt: usdtPrice
+      };
+    } catch (error) {
+      this.logger.error(`Lỗi khi lấy giá token: ${error.message}`);
+      // Fallback prices
+      return {
+        sol: 0,
+        usdt: 1
+      };
+    }
+  }
+
   private async getTokenBalances(walletAddress: string) {
     try {
       const publicKey = new PublicKey(walletAddress);
@@ -246,8 +272,23 @@ export class WalletBalanceGateway implements OnGatewayConnection, OnGatewayDisco
         }
       }
 
-      // this.logger.log(`Số dư cuối cùng cho ${walletAddress}:`, balances);
-      return balances;
+      // Lấy giá token
+      const prices = await this.getTokenPrices();
+      
+      // Tính giá trị USD
+      const balancesWithUSD = {
+        ...balances,
+        solUsd: balances.sol * prices.sol,
+        usdtUsd: balances.usdt * prices.usdt,
+        totalUsd: (balances.sol * prices.sol) + (balances.usdt * prices.usdt),
+        prices: {
+          sol: prices.sol,
+          usdt: prices.usdt
+        }
+      };
+
+      // this.logger.log(`Số dư cuối cùng cho ${walletAddress}:`, balancesWithUSD);
+      return balancesWithUSD;
     } catch (error) {
       this.logger.error(`Lỗi khi lấy số dư token cho ${walletAddress}: ${error.message}`);
       throw error;
