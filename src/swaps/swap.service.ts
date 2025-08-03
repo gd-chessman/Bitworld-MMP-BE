@@ -471,6 +471,9 @@ export class SwapService {
         if (errorMessage.includes('insufficient funds')) {
           throw new BadRequestException('Insufficient funds');
         }
+        if (errorMessage.includes('Attempt to debit an account but found no record of a prior credit')) {
+          throw new BadRequestException('Insufficient SOL balance');
+        }
         throw new BadRequestException(`Swap failed: ${errorMessage}`);
       }
 
