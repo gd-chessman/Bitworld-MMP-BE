@@ -453,7 +453,9 @@ export class SwapService {
         if (errorMessage.includes('insufficient balance')) {
           throw new BadRequestException('Insufficient token balance');
         }
-        
+        if (errorMessage.includes('insufficient funds')) {
+          throw new BadRequestException('Insufficient funds');
+        }
         throw new BadRequestException(`Swap failed: ${errorMessage}`);
       }
 
