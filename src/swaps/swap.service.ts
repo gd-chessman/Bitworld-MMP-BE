@@ -481,7 +481,10 @@ export class SwapService {
 
   async getSwapHistory(walletId: number, limit: number = 20, offset: number = 0): Promise<any> {
     const swapHistory = await this.swapOrderRepository.find({
-      where: { wallet_id: walletId },
+      where: { 
+        wallet_id: walletId,
+        status: SwapOrderStatus.COMPLETED
+      },
       order: { created_at: 'DESC' },
       take: limit,
       skip: offset,
