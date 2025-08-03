@@ -2743,7 +2743,8 @@ export class AdminService implements OnModuleInit {
   async getAirdropPoolsStakingLeaderboard(
     page: number = 1,
     limit: number = 20,
-    minVolume?: number
+    minVolume?: number,
+    maxVolume?: number
   ): Promise<AirdropStakingLeaderboardResponseDto> {
     try {
       // Get all active pools
@@ -2757,6 +2758,7 @@ export class AdminService implements OnModuleInit {
         poolId: number;
         poolName: string;
         poolSlug: string;
+        poolLogo?: string;
         totalPoolVolume: number;
         memberCount: number;
         topStaker: {
@@ -2799,34 +2801,62 @@ export class AdminService implements OnModuleInit {
           stakingDate: Date;
         }> = [];
 
-        // Add pool creator
+        // Group stakes by wallet and calculate total volume per user (including creator)
+        const userVolumes = new Map<number, {
+          totalVolume: number;
+          wallet: any;
+          earliestStakeDate: Date;
+          isCreator: boolean;
+        }>();
+
+        // Initialize creator volume if exists
         if (pool.originator) {
-          poolEntries.push({
-            walletId: pool.alp_originator,
-            solanaAddress: pool.originator.wallet_solana_address,
-            nickName: pool.originator.wallet_nick_name,
-            isBittworld: pool.originator.isBittworld,
-            bittworldUid: pool.originator.isBittworld ? pool.originator.bittworld_uid || null : null,
-            stakedVolume: Number(pool.apl_volume),
-            percentageOfPool: totalPoolVolume > 0 ? (Number(pool.apl_volume) / totalPoolVolume) * 100 : 0,
-            isCreator: true,
-            stakingDate: pool.apl_creation_date
+          userVolumes.set(pool.alp_originator, {
+            totalVolume: Number(pool.apl_volume),
+            wallet: pool.originator,
+            earliestStakeDate: pool.apl_creation_date,
+            isCreator: true
           });
         }
 
-        // Add other stakers
+        // Process all stakes (including creator's additional stakes)
         for (const stake of poolStakes) {
           const wallet = stake.member;
+          const walletId = stake.apj_member;
+          const stakeVolume = Number(stake.apj_volume);
+          const stakeDate = stake.apj_stake_date;
+
+          if (userVolumes.has(walletId)) {
+            // Update existing user - cộng dồn volume
+            const existing = userVolumes.get(walletId)!;
+            existing.totalVolume += stakeVolume;
+            if (stakeDate < existing.earliestStakeDate) {
+              existing.earliestStakeDate = stakeDate;
+            }
+          } else {
+            // Add new user
+            userVolumes.set(walletId, {
+              totalVolume: stakeVolume,
+              wallet: wallet,
+              earliestStakeDate: stakeDate,
+              isCreator: false
+            });
+          }
+        }
+
+        // Add all users with total volume per user
+        for (const [walletId, userData] of userVolumes) {
+          const wallet = userData.wallet;
           poolEntries.push({
-            walletId: stake.apj_member,
+            walletId: walletId,
             solanaAddress: wallet?.wallet_solana_address || '',
             nickName: wallet?.wallet_nick_name,
             isBittworld: wallet?.isBittworld || false,
             bittworldUid: wallet?.isBittworld ? wallet?.bittworld_uid || null : null,
-            stakedVolume: Number(stake.apj_volume),
-            percentageOfPool: totalPoolVolume > 0 ? (Number(stake.apj_volume) / totalPoolVolume) * 100 : 0,
-            isCreator: false,
-            stakingDate: stake.apj_stake_date
+            stakedVolume: userData.totalVolume,
+            percentageOfPool: totalPoolVolume > 0 ? (userData.totalVolume / totalPoolVolume) * 100 : 0,
+            isCreator: userData.isCreator,
+            stakingDate: userData.earliestStakeDate
           });
         }
 
@@ -2839,6 +2869,7 @@ export class AdminService implements OnModuleInit {
             poolId: pool.alp_id,
             poolName: pool.alp_name,
             poolSlug: pool.alp_slug,
+            poolLogo: pool.alp_logo,
             totalPoolVolume,
             memberCount: pool.alp_member_num,
             topStaker
@@ -2850,6 +2881,13 @@ export class AdminService implements OnModuleInit {
       if (minVolume !== undefined && minVolume > 0) {
         poolsLeaderboard = poolsLeaderboard.filter(pool => 
           pool.topStaker.stakedVolume >= minVolume
+        );
+      }
+
+      // Filter by maximum volume if specified
+      if (maxVolume !== undefined && maxVolume > 0) {
+        poolsLeaderboard = poolsLeaderboard.filter(pool => 
+          pool.topStaker.stakedVolume <= maxVolume
         );
       }
 
@@ -2877,6 +2915,7 @@ export class AdminService implements OnModuleInit {
         poolId: poolData.poolId,
         poolName: poolData.poolName,
         poolSlug: poolData.poolSlug,
+        poolLogo: poolData.poolLogo,
         totalPoolVolume: poolData.totalPoolVolume,
         memberCount: poolData.memberCount,
         volumeTier: getVolumeTier(poolData.topStaker.stakedVolume),

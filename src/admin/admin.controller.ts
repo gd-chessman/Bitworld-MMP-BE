@@ -627,8 +627,9 @@ export class AdminController {
   async getAirdropPoolsStakingLeaderboard(
     @Query('page', new ParseIntPipe({ optional: true })) page: number = 1,
     @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 20,
-    @Query('minVolume', new ParseIntPipe({ optional: true })) minVolume?: number
+    @Query('minVolume', new ParseIntPipe({ optional: true })) minVolume?: number,
+    @Query('maxVolume', new ParseIntPipe({ optional: true })) maxVolume?: number
   ): Promise<AirdropStakingLeaderboardResponseDto> {
-    return this.adminService.getAirdropPoolsStakingLeaderboard(page, limit, minVolume);
+    return this.adminService.getAirdropPoolsStakingLeaderboard(page, limit, minVolume, maxVolume);
   }
 }

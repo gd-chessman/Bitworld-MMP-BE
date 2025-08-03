@@ -3,6 +3,7 @@ export class AirdropStakingLeaderboardEntryDto {
   poolId: number;
   poolName: string;
   poolSlug: string;
+  poolLogo?: string;
   totalPoolVolume: number;
   memberCount: number;
   volumeTier: string;
