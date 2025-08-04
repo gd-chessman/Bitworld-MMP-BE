@@ -658,14 +658,7 @@ export class AdminController {
   @ApiOperation({ summary: 'Get Bittworld rewards statistics (Admin only)' })
   @ApiResponse({ status: 200, description: 'Bittworld rewards statistics retrieved successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can view statistics' })
-  async getBittworldRewardsStats(
-    @Query('page', new ParseIntPipe({ optional: true })) page: number = 1,
-    @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 20,
-    @Query('status') status?: 'pending' | 'can_withdraw' | 'withdrawn',
-    @Query('from_date') fromDate?: string,
-    @Query('to_date') toDate?: string,
-    @Query('search') search?: string
-  ): Promise<{
+  async getBittworldRewardsStats(): Promise<{
     overview: {
       totalRewards: number;
       totalAmountUSD: number;
@@ -675,21 +668,8 @@ export class AdminController {
       withdrawnRewards: number;
       averageRewardPerTransaction: number;
     };
-    rewards: Array<{
-      br_id: number;
-      br_amount_sol: number;
-      br_amount_usd: number;
-      br_date: Date;
-      br_status: string;
-    }>;
-    pagination: {
-      page: number;
-      limit: number;
-      total: number;
-      totalPages: number;
-    };
   }> {
-    return this.adminService.getBittworldRewardsStats(page, limit, status, fromDate, toDate, search);
+    return this.adminService.getBittworldRewardsStats();
   }
 
   @UseGuards(JwtAuthAdminGuard)
@@ -705,16 +685,6 @@ export class AdminController {
     @Query('to_date') toDate?: string,
     @Query('search') search?: string
   ): Promise<{
-    overview: {
-      totalWithdraws: number;
-      totalAmountUSD: number;
-      totalAmountSOL: number;
-      pendingWithdraws: number;
-      successfulWithdraws: number;
-      failedWithdraws: number;
-      cancelledWithdraws: number;
-      averageWithdrawAmount: number;
-    };
     withdraws: Array<{
       bw_id: number;
       bw_reward_id: number;

@@ -3086,14 +3086,7 @@ export class AdminService implements OnModuleInit {
   /**
    * Get Bittworld rewards statistics
    */
-  async getBittworldRewardsStats(
-    page: number = 1,
-    limit: number = 20,
-    status?: 'pending' | 'can_withdraw' | 'withdrawn',
-    fromDate?: string,
-    toDate?: string,
-    search?: string
-  ): Promise<{
+  async getBittworldRewardsStats(): Promise<{
     overview: {
       totalRewards: number;
       totalAmountUSD: number;
@@ -3103,53 +3096,8 @@ export class AdminService implements OnModuleInit {
       withdrawnRewards: number;
       averageRewardPerTransaction: number;
     };
-    rewards: Array<{
-      br_id: number;
-      br_amount_sol: number;
-      br_amount_usd: number;
-      br_date: Date;
-      br_status: string;
-    }>;
-    pagination: {
-      page: number;
-      limit: number;
-      total: number;
-      totalPages: number;
-    };
   }> {
     try {
-      // Build query for rewards
-      let query = this.bittworldRewardsRepository.createQueryBuilder('reward');
-
-      // Apply filters
-      if (status) {
-        query.andWhere('reward.br_status = :status', { status });
-      }
-
-      if (fromDate) {
-        query.andWhere('reward.br_date >= :fromDate', { fromDate: new Date(fromDate) });
-      }
-
-      if (toDate) {
-        query.andWhere('reward.br_date <= :toDate', { toDate: new Date(toDate) });
-      }
-
-      if (search) {
-        query.andWhere('(reward.br_id::text LIKE :search OR reward.br_amount_usd::text LIKE :search)', {
-          search: `%${search}%`
-        });
-      }
-
-      // Get total count for pagination
-      const total = await query.getCount();
-
-      // Apply pagination
-      const offset = (page - 1) * limit;
-      query.skip(offset).take(limit).orderBy('reward.br_date', 'DESC');
-
-      // Get rewards
-      const rewards = await query.getMany();
-
       // Get overview statistics
       const overviewQuery = this.bittworldRewardsRepository.createQueryBuilder('reward');
       
@@ -3189,23 +3137,8 @@ export class AdminService implements OnModuleInit {
         averageRewardPerTransaction: parseFloat(totalStats.averageRewardPerTransaction) || 0
       };
 
-      const pagination = {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit)
-      };
-
       return {
-        overview,
-        rewards: rewards.map(reward => ({
-          br_id: reward.br_id,
-          br_amount_sol: reward.br_amount_sol,
-          br_amount_usd: reward.br_amount_usd,
-          br_date: reward.br_date,
-          br_status: reward.br_status
-        })),
-        pagination
+        overview
       };
 
     } catch (error) {
@@ -3224,16 +3157,6 @@ export class AdminService implements OnModuleInit {
     toDate?: string,
     search?: string
   ): Promise<{
-    overview: {
-      totalWithdraws: number;
-      totalAmountUSD: number;
-      totalAmountSOL: number;
-      pendingWithdraws: number;
-      successfulWithdraws: number;
-      failedWithdraws: number;
-      cancelledWithdraws: number;
-      averageWithdrawAmount: number;
-    };
     withdraws: Array<{
       bw_id: number;
       bw_reward_id: number;
@@ -3291,47 +3214,6 @@ export class AdminService implements OnModuleInit {
       // Get withdraws
       const withdraws = await query.getMany();
 
-      // Get overview statistics
-      const overviewQuery = this.bittworldWithdrawRepository.createQueryBuilder('withdraw');
-      
-      const totalStats = await overviewQuery
-        .select([
-          'COUNT(*) as totalWithdraws',
-          'SUM(COALESCE(withdraw.bw_amount_usd, 0)) as totalAmountUSD',
-          'SUM(COALESCE(withdraw.bw_amount_sol, 0)) as totalAmountSOL',
-          'AVG(COALESCE(withdraw.bw_amount_usd, 0)) as averageWithdrawAmount'
-        ])
-        .getRawOne();
-
-      const statusStats = await this.bittworldWithdrawRepository
-        .createQueryBuilder('withdraw')
-        .select('withdraw.bw_status', 'status')
-        .addSelect('COUNT(*)', 'count')
-        .groupBy('withdraw.bw_status')
-        .getRawMany();
-
-      const statusCounts = {
-        pending: 0,
-        success: 0,
-        error: 0,
-        cancel: 0
-      };
-
-      statusStats.forEach(stat => {
-        statusCounts[stat.status] = parseInt(stat.count);
-      });
-
-      const overview = {
-        totalWithdraws: parseInt(totalStats.totalWithdraws) || 0,
-        totalAmountUSD: parseFloat(totalStats.totalAmountUSD) || 0,
-        totalAmountSOL: parseFloat(totalStats.totalAmountSOL) || 0,
-        pendingWithdraws: statusCounts.pending,
-        successfulWithdraws: statusCounts.success,
-        failedWithdraws: statusCounts.error,
-        cancelledWithdraws: statusCounts.cancel,
-        averageWithdrawAmount: parseFloat(totalStats.averageWithdrawAmount) || 0
-      };
-
       const pagination = {
         page,
         limit,
@@ -3340,7 +3222,6 @@ export class AdminService implements OnModuleInit {
       };
 
       return {
-        overview,
         withdraws: withdraws.map(withdraw => ({
           bw_id: withdraw.bw_id,
           bw_reward_id: withdraw.bw_reward_id,
