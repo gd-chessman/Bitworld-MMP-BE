@@ -41,10 +41,19 @@ export class BittworldWithdraw {
     @Column({ 
         name: 'bw_status', 
         type: 'enum', 
-        enum: ['pending', 'success', 'error', 'retry'],
+        enum: ['pending', 'success', 'error', 'cancel'],
         default: 'pending'
     })
-    bw_status: 'pending' | 'success' | 'error' | 'retry';
+    bw_status: 'pending' | 'success' | 'error' | 'cancel';
+
+    @Column({ 
+        name: 'bw_tx_hash', 
+        type: 'varchar', 
+        length: 255, 
+        nullable: true,
+        comment: 'Transaction hash of the SOL transfer'
+    })
+    bw_tx_hash: string;
 
     // Foreign key reference: bittworld_withdraws.bw_reward_id > bittworld_rewards.br_id
     @ManyToOne(() => BittworldRewards, reward => reward.withdraws)

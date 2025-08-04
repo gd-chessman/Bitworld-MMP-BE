@@ -30,10 +30,10 @@ export class BittworldRewards {
     @Column({ 
         name: 'br_status', 
         type: 'enum', 
-        enum: ['pending', 'can_withdraw', 'withdrawn', 'cancel'],
+        enum: ['pending', 'can_withdraw', 'withdrawn'],
         default: 'pending'
     })
-    br_status: 'pending' | 'can_withdraw' | 'withdrawn' | 'cancel';
+    br_status: 'pending' | 'can_withdraw' | 'withdrawn';
 
     // Relationship với bittworld_withdraws
     @OneToMany(() => BittworldWithdraw, withdraw => withdraw.reward)

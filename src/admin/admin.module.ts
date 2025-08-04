@@ -26,6 +26,9 @@ import { SwapSettings } from '../swaps/entities/swap-setting.entity';
 import { SwapInvestorReward } from '../swaps/entities/swap-investor-reward.entity';
 import { AirdropListPool } from '../airdrops/entities/airdrop-list-pool.entity';
 import { AirdropPoolJoin } from '../airdrops/entities/airdrop-pool-join.entity';
+import { BittworldsModule } from '../bittworlds/bittworlds.module';
+import { BittworldRewards } from '../bittworlds/entities/bittworld-rewards.entity';
+import { BittworldWithdraw } from '../bittworlds/entities/bittworld-withdraws.entity';
 
 @Module({
   imports: [
@@ -44,6 +47,8 @@ import { AirdropPoolJoin } from '../airdrops/entities/airdrop-pool-join.entity';
       SwapInvestorReward,
       AirdropListPool,
       AirdropPoolJoin,
+      BittworldRewards,
+      BittworldWithdraw,
     ]),
     PassportModule.register({ defaultStrategy: 'admin-jwt' }),
     JwtModule.register({
@@ -60,6 +65,7 @@ import { AirdropPoolJoin } from '../airdrops/entities/airdrop-pool-join.entity';
       }),
     }),
     ReferralModule,
+    BittworldsModule,
   ],
   controllers: [AdminController],
   providers: [AdminService, AdminGateway, AdminJwtStrategy],

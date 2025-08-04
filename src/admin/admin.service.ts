@@ -30,6 +30,9 @@ import { AirdropPoolResponseDto, AirdropPoolListResponseDto } from './dto/airdro
 import { AirdropPoolStatsResponseDto } from './dto/airdrop-pool-stats-response.dto';
 import { AirdropPoolDetailResponseDto, AirdropPoolTransactionDto, AirdropPoolMemberDto } from './dto/airdrop-pool-detail-response.dto';
 import { AirdropStakingLeaderboardResponseDto } from './dto/airdrop-staking-leaderboard.dto';
+import { BittworldsService } from '../bittworlds/services/bittworlds.service';
+import { BittworldRewards } from '../bittworlds/entities/bittworld-rewards.entity';
+import { BittworldWithdraw } from '../bittworlds/entities/bittworld-withdraws.entity';
 
 @Injectable()
 export class AdminService implements OnModuleInit {
@@ -63,6 +66,11 @@ export class AdminService implements OnModuleInit {
     @InjectRepository(AirdropPoolJoin)
     private airdropPoolJoinRepository: Repository<AirdropPoolJoin>,
     private dataSource: DataSource,
+    private bittworldsService: BittworldsService,
+    @InjectRepository(BittworldRewards)
+    private bittworldRewardsRepository: Repository<BittworldRewards>,
+    @InjectRepository(BittworldWithdraw)
+    private bittworldWithdrawRepository: Repository<BittworldWithdraw>,
   ) {
     // Initialize swap settings on app start
     this.initializeSwapSettings();
@@ -3030,5 +3038,329 @@ export class AdminService implements OnModuleInit {
     });
 
     return members;
+  }
+
+   // ==================== BITTWORLD MANAGEMENT ====================
+
+  /**
+   * Trigger Bittworld reward withdrawal manually (Admin only)
+   * Only highest admin role can trigger this action
+   */
+  async triggerBittworldWithdraw(currentUser: UserAdmin): Promise<{
+    success: boolean;
+    message: string;
+    processedRewards?: number;
+    totalAmount?: number;
+    timestamp: string;
+  }> {
+    try {
+      // Kiểm tra quyền - chỉ admin cao nhất mới được gọi
+      if (currentUser.role !== AdminRole.ADMIN) {
+        throw new ForbiddenException('Only admin with highest role can trigger Bittworld withdrawal');
+      }
+
+      // Gọi hàm trả hoa hồng Bittworld từ BittworldsService
+      const result = await this.bittworldsService.manualAutoRewardBittworld();
+
+      return {
+        success: result.success,
+        message: result.message,
+        processedRewards: result.processedRewards,
+        totalAmount: result.totalAmount,
+        timestamp: new Date().toISOString()
+      };
+
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        throw error;
+      }
+
+      return {
+        success: false,
+        message: `Failed to trigger Bittworld withdrawal: ${error.message}`,
+        timestamp: new Date().toISOString()
+      };
+    }
+  }
+
+  /**
+   * Get Bittworld rewards statistics
+   */
+  async getBittworldRewardsStats(
+    page: number = 1,
+    limit: number = 20,
+    status?: 'pending' | 'can_withdraw' | 'withdrawn',
+    fromDate?: string,
+    toDate?: string,
+    search?: string
+  ): Promise<{
+    overview: {
+      totalRewards: number;
+      totalAmountUSD: number;
+      totalAmountSOL: number;
+      pendingRewards: number;
+      canWithdrawRewards: number;
+      withdrawnRewards: number;
+      averageRewardPerTransaction: number;
+    };
+    rewards: Array<{
+      br_id: number;
+      br_amount_sol: number;
+      br_amount_usd: number;
+      br_date: Date;
+      br_status: string;
+    }>;
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }> {
+    try {
+      // Build query for rewards
+      let query = this.bittworldRewardsRepository.createQueryBuilder('reward');
+
+      // Apply filters
+      if (status) {
+        query.andWhere('reward.br_status = :status', { status });
+      }
+
+      if (fromDate) {
+        query.andWhere('reward.br_date >= :fromDate', { fromDate: new Date(fromDate) });
+      }
+
+      if (toDate) {
+        query.andWhere('reward.br_date <= :toDate', { toDate: new Date(toDate) });
+      }
+
+      if (search) {
+        query.andWhere('(reward.br_id::text LIKE :search OR reward.br_amount_usd::text LIKE :search)', {
+          search: `%${search}%`
+        });
+      }
+
+      // Get total count for pagination
+      const total = await query.getCount();
+
+      // Apply pagination
+      const offset = (page - 1) * limit;
+      query.skip(offset).take(limit).orderBy('reward.br_date', 'DESC');
+
+      // Get rewards
+      const rewards = await query.getMany();
+
+      // Get overview statistics
+      const overviewQuery = this.bittworldRewardsRepository.createQueryBuilder('reward');
+      
+      const totalStats = await overviewQuery
+        .select([
+          'COUNT(*) as totalRewards',
+          'SUM(COALESCE(reward.br_amount_usd, 0)) as totalAmountUSD',
+          'SUM(COALESCE(reward.br_amount_sol, 0)) as totalAmountSOL',
+          'AVG(COALESCE(reward.br_amount_usd, 0)) as averageRewardPerTransaction'
+        ])
+        .getRawOne();
+
+      const statusStats = await this.bittworldRewardsRepository
+        .createQueryBuilder('reward')
+        .select('reward.br_status', 'status')
+        .addSelect('COUNT(*)', 'count')
+        .groupBy('reward.br_status')
+        .getRawMany();
+
+      const statusCounts = {
+        pending: 0,
+        can_withdraw: 0,
+        withdrawn: 0
+      };
+
+      statusStats.forEach(stat => {
+        statusCounts[stat.status] = parseInt(stat.count);
+      });
+
+      const overview = {
+        totalRewards: parseInt(totalStats.totalRewards) || 0,
+        totalAmountUSD: parseFloat(totalStats.totalAmountUSD) || 0,
+        totalAmountSOL: parseFloat(totalStats.totalAmountSOL) || 0,
+        pendingRewards: statusCounts.pending,
+        canWithdrawRewards: statusCounts.can_withdraw,
+        withdrawnRewards: statusCounts.withdrawn,
+        averageRewardPerTransaction: parseFloat(totalStats.averageRewardPerTransaction) || 0
+      };
+
+      const pagination = {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      };
+
+      return {
+        overview,
+        rewards: rewards.map(reward => ({
+          br_id: reward.br_id,
+          br_amount_sol: reward.br_amount_sol,
+          br_amount_usd: reward.br_amount_usd,
+          br_date: reward.br_date,
+          br_status: reward.br_status
+        })),
+        pagination
+      };
+
+    } catch (error) {
+      throw new Error(`Failed to get Bittworld rewards statistics: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get Bittworld withdrawal history
+   */
+  async getBittworldWithdrawsHistory(
+    page: number = 1,
+    limit: number = 20,
+    status?: 'pending' | 'success' | 'error' | 'cancel',
+    fromDate?: string,
+    toDate?: string,
+    search?: string
+  ): Promise<{
+    overview: {
+      totalWithdraws: number;
+      totalAmountUSD: number;
+      totalAmountSOL: number;
+      pendingWithdraws: number;
+      successfulWithdraws: number;
+      failedWithdraws: number;
+      cancelledWithdraws: number;
+      averageWithdrawAmount: number;
+    };
+    withdraws: Array<{
+      bw_id: number;
+      bw_reward_id: number;
+      bw_amount_sol: number;
+      bw_amount_usd: number;
+      bw_address: string;
+      bw_date: Date;
+      bw_status: string;
+      bw_tx_hash?: string;
+      reward_info?: {
+        br_id: number;
+        br_amount_usd: number;
+        br_date: Date;
+      };
+    }>;
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }> {
+    try {
+      // Build query for withdraws
+      let query = this.bittworldWithdrawRepository
+        .createQueryBuilder('withdraw')
+        .leftJoinAndSelect('withdraw.reward', 'reward');
+
+      // Apply filters
+      if (status) {
+        query.andWhere('withdraw.bw_status = :status', { status });
+      }
+
+      if (fromDate) {
+        query.andWhere('withdraw.bw_date >= :fromDate', { fromDate: new Date(fromDate) });
+      }
+
+      if (toDate) {
+        query.andWhere('withdraw.bw_date <= :toDate', { toDate: new Date(toDate) });
+      }
+
+      if (search) {
+        query.andWhere('(withdraw.bw_id::text LIKE :search OR withdraw.bw_address LIKE :search OR withdraw.bw_amount_usd::text LIKE :search OR withdraw.bw_tx_hash LIKE :search)', {
+          search: `%${search}%`
+        });
+      }
+
+      // Get total count for pagination
+      const total = await query.getCount();
+
+      // Apply pagination
+      const offset = (page - 1) * limit;
+      query.skip(offset).take(limit).orderBy('withdraw.bw_date', 'DESC');
+
+      // Get withdraws
+      const withdraws = await query.getMany();
+
+      // Get overview statistics
+      const overviewQuery = this.bittworldWithdrawRepository.createQueryBuilder('withdraw');
+      
+      const totalStats = await overviewQuery
+        .select([
+          'COUNT(*) as totalWithdraws',
+          'SUM(COALESCE(withdraw.bw_amount_usd, 0)) as totalAmountUSD',
+          'SUM(COALESCE(withdraw.bw_amount_sol, 0)) as totalAmountSOL',
+          'AVG(COALESCE(withdraw.bw_amount_usd, 0)) as averageWithdrawAmount'
+        ])
+        .getRawOne();
+
+      const statusStats = await this.bittworldWithdrawRepository
+        .createQueryBuilder('withdraw')
+        .select('withdraw.bw_status', 'status')
+        .addSelect('COUNT(*)', 'count')
+        .groupBy('withdraw.bw_status')
+        .getRawMany();
+
+      const statusCounts = {
+        pending: 0,
+        success: 0,
+        error: 0,
+        cancel: 0
+      };
+
+      statusStats.forEach(stat => {
+        statusCounts[stat.status] = parseInt(stat.count);
+      });
+
+      const overview = {
+        totalWithdraws: parseInt(totalStats.totalWithdraws) || 0,
+        totalAmountUSD: parseFloat(totalStats.totalAmountUSD) || 0,
+        totalAmountSOL: parseFloat(totalStats.totalAmountSOL) || 0,
+        pendingWithdraws: statusCounts.pending,
+        successfulWithdraws: statusCounts.success,
+        failedWithdraws: statusCounts.error,
+        cancelledWithdraws: statusCounts.cancel,
+        averageWithdrawAmount: parseFloat(totalStats.averageWithdrawAmount) || 0
+      };
+
+      const pagination = {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      };
+
+      return {
+        overview,
+        withdraws: withdraws.map(withdraw => ({
+          bw_id: withdraw.bw_id,
+          bw_reward_id: withdraw.bw_reward_id,
+          bw_amount_sol: withdraw.bw_amount_sol,
+          bw_amount_usd: withdraw.bw_amount_usd,
+          bw_address: withdraw.bw_address,
+          bw_date: withdraw.bw_date,
+          bw_status: withdraw.bw_status,
+          bw_tx_hash: withdraw.bw_tx_hash,
+          reward_info: withdraw.reward ? {
+            br_id: withdraw.reward.br_id,
+            br_amount_usd: withdraw.reward.br_amount_usd,
+            br_date: withdraw.reward.br_date
+          } : undefined
+        })),
+        pagination
+      };
+
+    } catch (error) {
+      throw new Error(`Failed to get Bittworld withdrawal history: ${error.message}`);
+    }
   }
 }

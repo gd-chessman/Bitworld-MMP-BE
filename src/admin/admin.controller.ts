@@ -632,4 +632,111 @@ export class AdminController {
   ): Promise<AirdropStakingLeaderboardResponseDto> {
     return this.adminService.getAirdropPoolsStakingLeaderboard(page, limit, minVolume, maxVolume);
   }
+
+
+
+  // ==================== BITTWORLD MANAGEMENT ====================
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Post('bittworld-withdraw')
+  @ApiOperation({ summary: 'Manually trigger Bittworld reward withdrawal (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Bittworld reward withdrawal process completed' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can trigger withdrawal' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Only highest admin role can trigger withdrawal' })
+  async triggerBittworldWithdraw(@Request() req: any): Promise<{
+    success: boolean;
+    message: string;
+    processedRewards?: number;
+    totalAmount?: number;
+    timestamp: string;
+  }> {
+    return this.adminService.triggerBittworldWithdraw(req.user);
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Get('bittworld-rewards/statistics')
+  @ApiOperation({ summary: 'Get Bittworld rewards statistics (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Bittworld rewards statistics retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can view statistics' })
+  async getBittworldRewardsStats(
+    @Query('page', new ParseIntPipe({ optional: true })) page: number = 1,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 20,
+    @Query('status') status?: 'pending' | 'can_withdraw' | 'withdrawn',
+    @Query('from_date') fromDate?: string,
+    @Query('to_date') toDate?: string,
+    @Query('search') search?: string
+  ): Promise<{
+    overview: {
+      totalRewards: number;
+      totalAmountUSD: number;
+      totalAmountSOL: number;
+      pendingRewards: number;
+      canWithdrawRewards: number;
+      withdrawnRewards: number;
+      averageRewardPerTransaction: number;
+    };
+    rewards: Array<{
+      br_id: number;
+      br_amount_sol: number;
+      br_amount_usd: number;
+      br_date: Date;
+      br_status: string;
+    }>;
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }> {
+    return this.adminService.getBittworldRewardsStats(page, limit, status, fromDate, toDate, search);
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Get('bittworld-withdraws/history')
+  @ApiOperation({ summary: 'Get Bittworld withdrawal history (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Bittworld withdrawal history retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can view history' })
+  async getBittworldWithdrawsHistory(
+    @Query('page', new ParseIntPipe({ optional: true })) page: number = 1,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 20,
+    @Query('status') status?: 'pending' | 'success' | 'error' | 'cancel',
+    @Query('from_date') fromDate?: string,
+    @Query('to_date') toDate?: string,
+    @Query('search') search?: string
+  ): Promise<{
+    overview: {
+      totalWithdraws: number;
+      totalAmountUSD: number;
+      totalAmountSOL: number;
+      pendingWithdraws: number;
+      successfulWithdraws: number;
+      failedWithdraws: number;
+      cancelledWithdraws: number;
+      averageWithdrawAmount: number;
+    };
+    withdraws: Array<{
+      bw_id: number;
+      bw_reward_id: number;
+      bw_amount_sol: number;
+      bw_amount_usd: number;
+      bw_address: string;
+      bw_date: Date;
+      bw_status: string;
+      bw_tx_hash?: string;
+      reward_info?: {
+        br_id: number;
+        br_amount_usd: number;
+        br_date: Date;
+      };
+    }>;
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }> {
+    return this.adminService.getBittworldWithdrawsHistory(page, limit, status, fromDate, toDate, search);
+  }
 }
