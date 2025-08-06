@@ -1027,11 +1027,22 @@ export class BgRefService {
     // Lấy thông tin cây
     const tree = await this.getAffiliateTree(bgAffiliateInfo.treeId);
     
-    // Lấy thông tin wallet hiện tại
-    const currentWallet = await this.listWalletRepository.findOne({
-      where: { wallet_id: walletId },
-      select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address', 'isBittworld', 'bittworld_uid']
-    });
+    // Lấy thông tin wallet hiện tại và email từ user_wallets
+    const currentWalletWithEmail = await this.listWalletRepository
+      .createQueryBuilder('wallet')
+      .leftJoin('wallet.wallet_auths', 'wallet_auths')
+      .leftJoin('wallet_auths.wa_user', 'user_wallet')
+      .select([
+        'wallet.wallet_id',
+        'wallet.wallet_solana_address',
+        'wallet.wallet_nick_name',
+        'wallet.wallet_eth_address',
+        'wallet.isBittworld',
+        'wallet.bittworld_uid',
+        'user_wallet.uw_email'
+      ])
+      .where('wallet.wallet_id = :walletId', { walletId })
+      .getRawOne();
 
     // Lấy thông tin bg_alias từ node
     const bgNode = await this.bgAffiliateNodeRepository.findOne({
@@ -1048,14 +1059,15 @@ export class BgRefService {
 
     return {
       isBgAffiliate: true,
-      currentWallet: currentWallet ? {
-        walletId: currentWallet.wallet_id,
-        solanaAddress: currentWallet.wallet_solana_address,
-        nickName: currentWallet.wallet_nick_name,
-        ethAddress: currentWallet.wallet_eth_address,
-        isBittworld: currentWallet.isBittworld,
-        bittworldUid: currentWallet.bittworld_uid,
-        bgAlias: bgNode?.bg_alias || null
+      currentWallet: currentWalletWithEmail ? {
+        walletId: currentWalletWithEmail.wallet_wallet_id,
+        solanaAddress: currentWalletWithEmail.wallet_wallet_solana_address,
+        nickName: currentWalletWithEmail.wallet_wallet_nick_name,
+        ethAddress: currentWalletWithEmail.wallet_wallet_eth_address,
+        isBittworld: currentWalletWithEmail.wallet_isBittworld,
+        bittworldUid: currentWalletWithEmail.wallet_bittworld_uid,
+        bgAlias: bgNode?.bg_alias || null,
+        email: currentWalletWithEmail.user_wallet_uw_email || null
       } : null,
       treeInfo: {
         treeId: tree.bat_id,

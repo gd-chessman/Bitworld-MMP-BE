@@ -157,20 +157,31 @@ export class BgRefController {
     const isBgAffiliate = await this.bgRefService.isWalletInBgAffiliateSystem(walletId);
     const bgAffiliateInfo = await this.bgRefService.getWalletBgAffiliateInfo(walletId);
     
-    // Lấy thông tin wallet hiện tại
-    const currentWallet = await this.bgRefService['listWalletRepository'].findOne({
-      where: { wallet_id: walletId },
-      select: ['wallet_id', 'wallet_solana_address', 'wallet_nick_name', 'wallet_eth_address', 'wallet_code_ref']
-    });
+    // Lấy thông tin wallet hiện tại và email từ user_wallets
+    const currentWalletWithEmail = await this.bgRefService['listWalletRepository']
+      .createQueryBuilder('wallet')
+      .leftJoin('wallet.wallet_auths', 'wallet_auths')
+      .leftJoin('wallet_auths.wa_user', 'user_wallet')
+      .select([
+        'wallet.wallet_id',
+        'wallet.wallet_solana_address',
+        'wallet.wallet_nick_name',
+        'wallet.wallet_eth_address',
+        'wallet.wallet_code_ref',
+        'user_wallet.uw_email'
+      ])
+      .where('wallet.wallet_id = :walletId', { walletId })
+      .getRawOne();
     
     return {
       isBgAffiliate,
-      currentWallet: currentWallet ? {
-        walletId: currentWallet.wallet_id,
-        solanaAddress: currentWallet.wallet_solana_address,
-        nickName: currentWallet.wallet_nick_name,
-        ethAddress: currentWallet.wallet_eth_address,
-        refCode: currentWallet?.wallet_code_ref || null
+      currentWallet: currentWalletWithEmail ? {
+        walletId: currentWalletWithEmail.wallet_wallet_id,
+        solanaAddress: currentWalletWithEmail.wallet_wallet_solana_address,
+        nickName: currentWalletWithEmail.wallet_wallet_nick_name,
+        ethAddress: currentWalletWithEmail.wallet_wallet_eth_address,
+        refCode: currentWalletWithEmail.wallet_wallet_code_ref || null,
+        email: currentWalletWithEmail.user_wallet_uw_email || null
       } : null,
       bgAffiliateInfo,
     };
