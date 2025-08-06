@@ -385,8 +385,8 @@ export class TradeService {
                 throw new Error(`Invalid private key format: ${error.message}`);
             }
 
-            // Tính toán số lượng token/SOL thực tế sau khi trừ phí
-            const actualAmount = order.order_qlty * 0.99; // 99% số lượng ban đầu
+            // Sử dụng toàn bộ số lượng ban đầu cho giao dịch
+            const actualAmount = order.order_qlty; // 100% số lượng ban đầu
             const feeAmount = order.order_qlty * 0.01; // 1% phí giao dịch
 
             // Lấy giá token theo USD và SOL
@@ -424,7 +424,7 @@ export class TradeService {
                     const feeSuccess = await this.solanaService.handleTransactionFee(
                         privateKey,
                         order.order_trade_type === 'buy' ? 'So11111111111111111111111111111111111111112' : order.order_token_address,
-                        order.order_qlty,
+                        feeAmount, // ✅ SỬA: Truyền feeAmount thay vì order_qlty
                         order.order_trade_type === 'buy', // isSOL = true cho lệnh mua
                         order.order_trade_type === 'sell' // isSell = true cho lệnh bán
                     );

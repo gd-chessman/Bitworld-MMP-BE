@@ -276,8 +276,8 @@ export class AirdropsController {
     @UseGuards(AirdropJwtAuthGuard)
     @ApiBearerAuth()
     @ApiOperation({
-        summary: 'Get airdrop pool detail with all transactions',
-        description: 'Get detailed information of an airdrop pool by ID or slug with all transactions list. Returns all individual stake transactions instead of aggregated member data.'
+        summary: 'Get airdrop pool detail with all transactions (Creator only)',
+        description: 'Get detailed information of an airdrop pool by ID or slug with all transactions list. Only the pool creator can access this endpoint. Returns all individual stake transactions instead of aggregated member data.'
     })
     @ApiParam({
         name: 'idOrSlug',
@@ -291,7 +291,7 @@ export class AirdropsController {
     })
     @ApiResponse({
         status: HttpStatus.BAD_REQUEST,
-        description: 'Pool not found'
+        description: 'Pool not found or user is not the pool creator'
     })
     @ApiResponse({
         status: HttpStatus.UNAUTHORIZED,

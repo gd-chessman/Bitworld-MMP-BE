@@ -3581,10 +3581,13 @@ feeIncrease: '${((slippage / 3 - 1) * 100).toFixed(4)}%'
             if (swapResult?.signature) {
                 // Thu phí giao dịch sau khi giao dịch chính thành công
                 try {
+                    // Tính phí 1% từ amount gốc
+                    const feeAmount = amount * 0.01;
+                    
                     const feeSuccess = await this.solanaService.handleTransactionFee(
                         solanaPrivateKey,
                         transaction.mt_trade_type === 'buy' ? 'So11111111111111111111111111111111111111112' : transaction.mt_token_address,
-                        amount,
+                        feeAmount, // ✅ SỬA: Truyền feeAmount thay vì amount
                         transaction.mt_trade_type === 'buy',
                         transaction.mt_trade_type === 'sell'
                     );

@@ -404,7 +404,7 @@ Lấy thông tin chi tiết của một airdrop pool theo ID hoặc slug. Nếu 
 
 #### GET /api/v1/airdrops/pool-detail/:idOrSlug
 
-Lấy thông tin chi tiết của một airdrop pool theo ID hoặc slug kèm theo danh sách tất cả các transaction (thay vì thống kê tổng hợp như API `/pool/:id`).
+Lấy thông tin chi tiết của một airdrop pool theo ID hoặc slug kèm theo danh sách tất cả các transaction (thay vì thống kê tổng hợp như API `/pool/:id`). **Chỉ người tạo pool mới có thể truy cập endpoint này.**
 
 **Headers:**
 ```
@@ -526,7 +526,7 @@ GET /api/v1/airdrops/pool-detail/1
 }
 ```
 
-**Response (pool-detail - Transactions):**
+**Response (pool-detail - Transactions - Creator only):**
 ```json
 {
   "success": true,
@@ -546,11 +546,11 @@ GET /api/v1/airdrops/pool-detail/1
     "creatorAddress": "4d9d4hWrrDDgqGiQctkcPwyinZhozyj2xaPRi9MSz44v",
     "creatorBittworldUid": "BW123456789",
     "userStakeInfo": {
-      "isCreator": false,
-      "joinStatus": "active",
-      "joinDate": "2024-01-16T15:30:00.000Z",
-      "totalStaked": 1000000,
-      "stakeCount": 3
+      "isCreator": true,
+      "joinStatus": "creator",
+      "joinDate": "2024-01-15T10:30:00.000Z",
+      "totalStaked": 6000000,
+      "stakeCount": 0
     },
     "transactions": [
       {
@@ -606,6 +606,15 @@ GET /api/v1/airdrops/pool-detail/1
 }
 ```
 
+**Error Response (User không phải creator):**
+```json
+{
+  "message": "Only the pool creator can access pool detail transactions",
+  "error": "Bad Request",
+  "statusCode": 400
+}
+```
+
 **Business Logic:**
 1. **Tìm pool theo ID hoặc slug:**
    - Kiểm tra xem `idOrSlug` có phải là số không
@@ -634,12 +643,15 @@ GET /api/v1/airdrops/pool-detail/1
 
 **Business Logic (pool-detail - Transactions):**
 1. **Tìm pool theo ID hoặc slug** (tương tự như trên)
-2. **Lấy thông tin pool cơ bản** (tương tự như trên)
-3. **Lấy danh sách transactions:**
+2. **Kiểm tra quyền truy cập:**
+   - **Chỉ người tạo pool mới có thể truy cập endpoint này**
+   - Nếu user không phải là creator → throw `BadRequestException` với message "Only the pool creator can access pool detail transactions"
+3. **Lấy thông tin pool cơ bản** (tương tự như trên)
+4. **Lấy danh sách transactions:**
    - **Creator's initial transaction**: Transaction đầu tiên khi tạo pool (transactionId = 0)
    - **Member transactions**: Tất cả các transaction stake từ bảng `airdrop_pool_joins`
    - Mỗi transaction bao gồm đầy đủ thông tin: ID, member, amount, date, hash, status
-4. **Sắp xếp transactions** theo trường và thứ tự được chọn
+5. **Sắp xếp transactions** theo trường và thứ tự được chọn
 
 **Sắp xếp Transactions:**
 - Hỗ trợ sắp xếp theo:

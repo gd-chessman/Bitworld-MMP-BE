@@ -787,7 +787,21 @@ export class AirdropsService {
                 totalUserStaked += Number(pool.apl_volume);
             }
 
-            // 7. Create basic pool information
+            // 7. Calculate total volume: initial volume + total stake volume
+            const allPoolStakes = await this.airdropPoolJoinRepository.find({
+                where: {
+                    apj_pool_id: poolId,
+                    apj_status: AirdropPoolJoinStatus.ACTIVE
+                }
+            });
+
+            // Calculate total stake volume
+            const totalStakeVolume = allPoolStakes.reduce((sum, stake) => sum + Number(stake.apj_volume), 0);
+            
+            // Total volume = initial volume + total stake volume
+            const totalPoolVolume = Number(pool.apl_volume) + totalStakeVolume;
+
+            // 8. Create basic pool information
             const poolDetail: PoolDetailDto = {
                 poolId: pool.alp_id,
                 name: pool.alp_name,
@@ -795,7 +809,7 @@ export class AirdropsService {
                 logo: pool.alp_logo || '',
                 describe: pool.alp_describe || '',
                 memberCount: pool.alp_member_num,
-                totalVolume: Number(pool.apl_volume),
+                totalVolume: totalPoolVolume,
                 creationDate: pool.apl_creation_date,
                 endDate: pool.apl_end_date,
                 status: pool.apl_status,
@@ -804,7 +818,7 @@ export class AirdropsService {
                 creatorBittworldUid: creatorWallet?.bittworld_uid || null
             };
 
-            // 8. Add user stake information if exists
+            // 9. Add user stake information if exists
             if (userStakes.length > 0 || isCreator) {
                 const firstStakeDate = userStakes.length > 0 
                     ? userStakes[0].apj_stake_date 
@@ -819,7 +833,7 @@ export class AirdropsService {
                 };
             }
 
-            // 9. If user is creator, get all members list
+            // 10. If user is creator, get all members list
             if (isCreator) {
                 const members = await this.getPoolMembers(poolId, query);
                 poolDetail.members = members;
@@ -1599,6 +1613,11 @@ export class AirdropsService {
                 throw new Error('Pool does not exist');
             }
 
+            // Check if user is the creator of the pool
+            if (pool.alp_originator !== walletId) {
+                throw new BadRequestException('Only the pool creator can access pool detail transactions');
+            }
+
             // Call getPoolDetailTransactions method with found poolId
             return await this.getPoolDetailTransactions(pool.alp_id, walletId, query);
 
@@ -1649,7 +1668,21 @@ export class AirdropsService {
                 totalUserStaked += Number(pool.apl_volume);
             }
 
-            // 7. Create basic pool information
+            // 7. Calculate total volume: initial volume + total stake volume
+            const allPoolStakes = await this.airdropPoolJoinRepository.find({
+                where: {
+                    apj_pool_id: poolId,
+                    apj_status: AirdropPoolJoinStatus.ACTIVE
+                }
+            });
+
+            // Calculate total stake volume
+            const totalStakeVolume = allPoolStakes.reduce((sum, stake) => sum + Number(stake.apj_volume), 0);
+            
+            // Total volume = initial volume + total stake volume
+            const totalPoolVolume = Number(pool.apl_volume) + totalStakeVolume;
+
+            // 8. Create basic pool information
             const poolDetail: PoolDetailTransactionsDto = {
                 poolId: pool.alp_id,
                 name: pool.alp_name,
@@ -1657,7 +1690,7 @@ export class AirdropsService {
                 logo: pool.alp_logo || '',
                 describe: pool.alp_describe || '',
                 memberCount: pool.alp_member_num,
-                totalVolume: Number(pool.apl_volume),
+                totalVolume: totalPoolVolume,
                 creationDate: pool.apl_creation_date,
                 endDate: pool.apl_end_date,
                 status: pool.apl_status,
@@ -1667,7 +1700,7 @@ export class AirdropsService {
                 transactions: []
             };
 
-            // 8. Add user stake information if exists
+            // 9. Add user stake information if exists
             if (userStakes.length > 0 || isCreator) {
                 const firstStakeDate = userStakes.length > 0 
                     ? userStakes[0].apj_stake_date 
@@ -1682,7 +1715,7 @@ export class AirdropsService {
                 };
             }
 
-            // 9. Get all transactions in the pool
+            // 10. Get all transactions in the pool
             const transactions = await this.getPoolTransactions(poolId, query);
             poolDetail.transactions = transactions;
 

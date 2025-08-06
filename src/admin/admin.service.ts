@@ -396,7 +396,7 @@ export class AdminService implements OnModuleInit {
     isBittworld?: string,
     bittworld_uid?: string,
     bg_affiliate?: 'bg' | 'non_bg'
-  ): Promise<{ data: ListWallet[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
+  ): Promise<{ data: any[]; pagination: { page: number; limit: number; total: number; totalPages: number } }> {
     const skip = (page - 1) * limit;
     
     const queryBuilder = this.listWalletRepository.createQueryBuilder('wallet')
@@ -416,6 +416,7 @@ export class AdminService implements OnModuleInit {
         'wallet.bittworld_uid',
         'wallet_auths',
         'user_wallet.uw_id',
+        'user_wallet.uw_email',
         'user_wallet.created_at'
       ]);
 
@@ -479,8 +480,20 @@ export class AdminService implements OnModuleInit {
       .take(limit)
       .getManyAndCount();
 
+    // Transform wallets to include email
+    const walletsWithEmail: any[] = wallets.map(wallet => {
+      // Find the main wallet auth to get the associated user email
+      const mainWalletAuth = wallet.wallet_auths?.find(auth => auth.wa_type === 'main');
+      const userEmail = mainWalletAuth?.wa_user?.uw_email || null;
+      
+      return {
+        ...wallet,
+        email: userEmail
+      };
+    });
+
     return {
-      data: wallets,
+      data: walletsWithEmail,
       pagination: {
         page,
         limit,
@@ -2597,15 +2610,28 @@ export class AdminService implements OnModuleInit {
       where: { apl_status: AirdropPoolStatus.ACTIVE }
     });
 
-    // Get total members and volume across all pools
+    // Get total members and initial volume across all pools
     const totalStats = await this.airdropListPoolRepository
       .createQueryBuilder('pool')
       .select('SUM(pool.alp_member_num)', 'totalMembers')
-      .addSelect('SUM(pool.apl_volume)', 'totalVolume')
+      .addSelect('SUM(pool.apl_volume)', 'initialVolume')
       .getRawOne();
 
+      
     const totalMembers = parseInt(totalStats?.totalMembers || '0');
-    const totalVolume = parseFloat(totalStats?.totalVolume || '0');
+    const initialVolume = parseFloat(totalStats?.initialVolume || '0');
+
+    // Get total stake volume from airdrop_pool_joins table
+    const stakeVolumeStats = await this.airdropPoolJoinRepository
+      .createQueryBuilder('join')
+      .select('SUM(join.apj_volume)', 'totalStakeVolume')
+      .where('join.apj_status = :status', { status: AirdropPoolJoinStatus.ACTIVE })
+      .getRawOne();
+
+    const totalStakeVolume = parseFloat(stakeVolumeStats?.totalStakeVolume || '0');
+
+    // Total volume = initial volume + total stake volume
+    const totalVolume = initialVolume + totalStakeVolume;
 
     // Currently running pools (same as active pools)
     const currentlyRunning = activePools;
