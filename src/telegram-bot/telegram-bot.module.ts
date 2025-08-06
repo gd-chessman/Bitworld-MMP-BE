@@ -15,6 +15,7 @@ import { LoginEmailController } from './login-email.controller';
 import { LoginEmailService } from './login-email.service';
 import { AuthModule } from '../auth/auth.module';
 import { GoogleAuthService } from './google-auth.service';
+import { NotificationModule } from '../notifications/notification.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { GoogleAuthService } from './google-auth.service';
     forwardRef(() => SolanaModule),
     forwardRef(() => ReferralModule),
     forwardRef(() => AuthModule),
+    NotificationModule,
   ],
   controllers: [LoginEmailController],
   providers: [

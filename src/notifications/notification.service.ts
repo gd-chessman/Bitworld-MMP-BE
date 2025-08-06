@@ -166,4 +166,37 @@ This code will expire in 5 minutes.
             text: body,
         });
     }
+
+    async sendVerificationCodeEmail(to: string, code: string): Promise<void> {
+        const smtpHost = this.configService.get<string>('SMTP_HOST');
+        const smtpPort = this.configService.get<number>('SMTP_PORT');
+        const smtpUser = this.configService.get<string>('SMTP_USER');
+        const smtpPass = this.configService.get<string>('SMTP_PASS');
+        const fromName = this.configService.get<string>('SMTP_FROM_NAME') || 'Memepump';
+        const fromEmail = this.configService.get<string>('SMTP_FROM') || smtpUser;
+
+        if (!smtpHost || !smtpPort || !smtpUser || !smtpPass) {
+            throw new Error('SMTP configuration is missing in environment variables');
+        }
+
+        const transporter = nodemailer.createTransport({
+            host: smtpHost,
+            port: smtpPort,
+            secure: smtpPort === 465, // true for 465, false for other ports
+            auth: {
+                user: smtpUser,
+                pass: smtpPass,
+            },
+        });
+
+        const subject = 'Email Verification Code';
+        const body = `Your email verification code is: ${code}\n\nThis code will expire in 3 minutes.\nPlease use this code to complete your registration.\n\nIf you did not request this verification code, please ignore this email.`;
+
+        await transporter.sendMail({
+            from: `"${fromName}" <${fromEmail}>`,
+            to,
+            subject,
+            text: body,
+        });
+    }
 } 

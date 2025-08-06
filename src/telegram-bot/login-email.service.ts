@@ -1,14 +1,16 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, MoreThan } from 'typeorm';
 import { UserWallet } from '../telegram-wallets/entities/user-wallet.entity';
 import { ListWallet } from '../telegram-wallets/entities/list-wallet.entity';
 import { WalletAuth } from '../telegram-wallets/entities/wallet-auth.entity';
 import { WalletReferent } from '../referral/entities/wallet-referent.entity';
+import { UserWalletCode } from '../telegram-wallets/entities/user-wallet-code.entity';
 import { TelegramBotService } from './telegram-bot.service';
 import { AuthService } from '../auth/auth.service';
 import { GoogleAuthService } from './google-auth.service';
 import { BgRefService } from '../referral/bg-ref.service';
+import { NotificationService } from '../notifications/notification.service';
 import { Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { ethers } from 'ethers';
@@ -29,11 +31,16 @@ export interface ManualRegisterDto {
     refCode?: string;
     password: string;
     email: string;
+    verificationCode: string;
 }
 
 export interface ManualLoginDto {
     email: string;
     password: string;
+}
+
+export interface SendVerificationCodeDto {
+    email: string;
 }
 
 export interface LoginResponse {
@@ -97,6 +104,11 @@ export interface ManualLoginResponseDto {
     };
 }
 
+export interface SendVerificationCodeResponseDto {
+    status: number;
+    message: string;
+}
+
 @Injectable()
 export class LoginEmailService {
     private readonly logger = new Logger(LoginEmailService.name);
@@ -110,10 +122,13 @@ export class LoginEmailService {
         private readonly walletAuthRepository: Repository<WalletAuth>,
         @InjectRepository(WalletReferent)
         private readonly walletReferentRepository: Repository<WalletReferent>,
+        @InjectRepository(UserWalletCode)
+        private readonly userWalletCodeRepository: Repository<UserWalletCode>,
         private readonly telegramBotService: TelegramBotService,
         private readonly authService: AuthService,
         private readonly googleAuthService: GoogleAuthService,
         private readonly bgRefService: BgRefService,
+        private readonly notificationService: NotificationService,
         private readonly configService: ConfigService,
     ) {}
 
@@ -451,9 +466,12 @@ export class LoginEmailService {
             const normalize = (domain: string) => domain.replace(/^www\./, '');
             const isBittworld = !!bittworldDomain && normalize(frontendDomain) === normalize(bittworldDomain);
 
-            // 1. Kiểm tra email đã tồn tại chưa
+            // 1. Kiểm tra email đã tồn tại chưa (chỉ kiểm tra user đã active)
             const existingUser = await this.userWalletRepository.findOne({
-                where: { uw_email: dto.email }
+                where: { 
+                    uw_email: dto.email,
+                    active_email: true // Chỉ kiểm tra user đã active
+                }
             });
 
             if (existingUser) {
@@ -463,7 +481,26 @@ export class LoginEmailService {
                 };
             }
 
-            // 2. Kiểm tra nickname đã tồn tại chưa
+            // 2. Kiểm tra verification code
+            const now = new Date();
+            const verificationCodeRecord = await this.userWalletCodeRepository.findOne({
+                where: {
+                    tw_code_value: dto.verificationCode,
+                    tw_code_type: 4,
+                    tw_code_status: true,
+                    tw_code_time: MoreThan(now)
+                },
+                relations: ['wallet']
+            });
+
+            if (!verificationCodeRecord || !verificationCodeRecord.wallet || verificationCodeRecord.wallet.uw_email !== dto.email) {
+                return {
+                    status: 400,
+                    message: 'Invalid or expired verification code'
+                };
+            }
+
+            // 3. Kiểm tra nickname đã tồn tại chưa
             const existingWallet = await this.listWalletRepository.findOne({
                 where: { wallet_nick_name: dto.nick_name }
             });
@@ -475,7 +512,20 @@ export class LoginEmailService {
                 };
             }
 
-            // 3. Kiểm tra referral code nếu có
+            if (dto.bittworld_uid) {
+                const existingBittworldWallet = await this.listWalletRepository.findOne({
+                    where: { bittworld_uid: dto.bittworld_uid }
+                });
+
+                if (existingBittworldWallet) {
+                    return {
+                        status: 409,
+                        message: 'Bittworld UID already exists'
+                    };
+                }
+            }
+
+            // 4. Kiểm tra referral code nếu có
             let referrerWallet: ListWallet | null = null;
             if (dto.refCode) {
                 referrerWallet = await this.listWalletRepository.findOne({
@@ -490,20 +540,22 @@ export class LoginEmailService {
                 }
             }
 
-            // 4. Hash password
+            // 5. Hash password
             const salt = await bcrypt.genSalt();
             const hashedPassword = await bcrypt.hash(dto.password, salt);
 
-            // 5. Tạo user mới
-            const newUser = this.userWalletRepository.create({
-                uw_email: dto.email,
-                uw_password: hashedPassword,
-                active_email: true, // Tự động verify email cho manual register
-                isBittworld: isBittworld
-            });
-            await this.userWalletRepository.save(newUser);
+            // 6. Tạo user mới (thay thế user tạm thời)
+            const tempUser = verificationCodeRecord.wallet;
+            
+            // Cập nhật thông tin user tạm thời thành user thực sự
+            tempUser.uw_password = hashedPassword;
+            tempUser.active_email = true;
+            tempUser.isBittworld = isBittworld;
+            await this.userWalletRepository.save(tempUser);
 
-            // 6. Tạo wallet mới
+            const newUser = tempUser;
+
+            // 7. Tạo wallet mới
             const solanaKeypair = Keypair.generate();
             const solanaPublicKey = solanaKeypair.publicKey.toBase58();
             const solanaPrivateKey = bs58.encode(solanaKeypair.secretKey);
@@ -534,7 +586,7 @@ export class LoginEmailService {
             });
             await this.listWalletRepository.save(newWallet);
 
-            // 7. Tạo wallet_auth link
+            // 8. Tạo wallet_auth link
             const walletAuth = this.walletAuthRepository.create({
                 wa_user_id: newUser.uw_id,
                 wa_wallet_id: newWallet.wallet_id,
@@ -543,7 +595,7 @@ export class LoginEmailService {
             });
             await this.walletAuthRepository.save(walletAuth);
 
-            // 8. Tạo referral relationship nếu có refCode
+            // 9. Tạo referral relationship nếu có refCode
             if (referrerWallet) {
                 const referralSuccess = await this.createReferralRelationship(newWallet.wallet_id, referrerWallet.wallet_id);
                 if (referralSuccess) {
@@ -553,7 +605,11 @@ export class LoginEmailService {
                 }
             }
 
-            // 9. Tạo JWT token
+            // 10. Xóa verification code đã sử dụng
+            verificationCodeRecord.tw_code_status = false;
+            await this.userWalletCodeRepository.save(verificationCodeRecord);
+
+            // 11. Tạo JWT token
             const payload = {
                 uid: newUser.uw_id,
                 wallet_id: newWallet.wallet_id,
@@ -686,5 +742,120 @@ export class LoginEmailService {
                 message: `Login error: ${error.message}`
             };
         }
+    }
+
+    async sendVerificationCode(dto: SendVerificationCodeDto): Promise<SendVerificationCodeResponseDto> {
+        try {
+            this.logger.log(`Starting to send verification code for email: ${dto.email}`);
+
+            // 1. Kiểm tra email đã tồn tại chưa (chỉ kiểm tra user đã active)
+            const existingUser = await this.userWalletRepository.findOne({
+                where: { 
+                    uw_email: dto.email,
+                    active_email: true // Chỉ kiểm tra user đã active
+                }
+            });
+
+            if (existingUser) {
+                return {
+                    status: 409,
+                    message: 'Email already exists. Please use a different email or try to login.'
+                };
+            }
+
+            // 1.1. Xóa user tạm thời nếu có
+            const tempUser = await this.userWalletRepository.findOne({
+                where: { 
+                    uw_email: dto.email,
+                    active_email: false // Chỉ tìm user tạm thời
+                }
+            });
+
+            if (tempUser) {
+                // Xóa user tạm thời và code liên quan
+                await this.userWalletCodeRepository.delete({
+                    tw_wallet_id: tempUser.uw_id,
+                    tw_code_type: 4
+                });
+                await this.userWalletRepository.remove(tempUser);
+                this.logger.log(`Cleaned up temporary user for email: ${dto.email}`);
+            }
+
+            // 2. Kiểm tra xem có code đang active không cho email này
+            const now = new Date();
+            const existingCode = await this.userWalletCodeRepository.findOne({
+                where: {
+                    tw_code_value: dto.email, // Sử dụng email làm code_value
+                    tw_code_type: 4, // Loại code cho email verification
+                    tw_code_status: true,
+                    tw_code_time: MoreThan(now)
+                }
+            });
+
+            if (existingCode) {
+                return {
+                    status: 403,
+                    message: 'A verification code is already active for this email. Please wait for it to expire or use the existing code.'
+                };
+            }
+
+            // 3. Tạo code mới (6 chữ số)
+            const code = this.generateRandomCode(6);
+            const threeMinutesLater = new Date(now.getTime() + 3 * 60 * 1000); // UTC + 3 phút
+
+            // 4. Tạo user tạm thời để lưu code
+            const tempUserForCode = this.userWalletRepository.create({
+                uw_email: dto.email,
+                active_email: false,
+                isBittworld: false
+            });
+            await this.userWalletRepository.save(tempUserForCode);
+
+            // 5. Lưu code vào database
+            const newCode = this.userWalletCodeRepository.create({
+                tw_wallet_id: tempUserForCode.uw_id,
+                tw_code_type: 4, // Loại code cho email verification
+                tw_code_status: true,
+                tw_code_time: threeMinutesLater,
+                tw_code_value: code // Chỉ lưu code
+            });
+            await this.userWalletCodeRepository.save(newCode);
+
+            // 6. Gửi code qua email
+            try {
+                await this.notificationService.sendVerificationCodeEmail(dto.email, code);
+                this.logger.log(`Verification code sent successfully to email: ${dto.email}`);
+            } catch (emailError) {
+                this.logger.error(`Error sending verification code email: ${emailError.message}`);
+                // Xóa code và user tạm thời nếu gửi email thất bại
+                await this.userWalletCodeRepository.remove(newCode);
+                await this.userWalletRepository.remove(tempUserForCode);
+                return {
+                    status: 500,
+                    message: 'Failed to send verification code. Please try again later.'
+                };
+            }
+
+            return {
+                status: 200,
+                message: 'Verification code has been sent to your email'
+            };
+
+        } catch (error) {
+            this.logger.error(`Error in sendVerificationCode: ${error.message}`, error.stack);
+            return {
+                status: 500,
+                message: `Failed to send verification code: ${error.message}`
+            };
+        }
+    }
+
+    private generateRandomCode(length: number): string {
+        const digits = '0123456789';
+        let code = '';
+        for (let i = 0; i < length; i++) {
+            code += digits[Math.floor(Math.random() * digits.length)];
+        }
+        return code;
     }
 } 

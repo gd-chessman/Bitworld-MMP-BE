@@ -1,5 +1,5 @@
 import { Controller, Post, Body, BadRequestException, Logger, Req, HttpCode, HttpStatus, ConflictException, InternalServerErrorException, UnauthorizedException, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { LoginEmailService, GoogleLoginDto, LoginResponse, ManualRegisterDto, ManualRegisterResponseDto, ManualLoginDto, ManualLoginResponseDto } from './login-email.service';
+import { LoginEmailService, GoogleLoginDto, LoginResponse, ManualRegisterDto, ManualRegisterResponseDto, ManualLoginDto, ManualLoginResponseDto, SendVerificationCodeDto, SendVerificationCodeResponseDto } from './login-email.service';
 import { Request } from 'express';
 
 @Controller('login-email')
@@ -20,6 +20,36 @@ export class LoginEmailController {
             throw new BadRequestException({
                 statusCode: 400,
                 message: error.message || 'Login failed',
+                error: 'Bad Request'
+            });
+        }
+    }
+
+    @Post('send-verification-code')
+    @HttpCode(HttpStatus.OK)
+    async sendVerificationCode(@Body() dto: SendVerificationCodeDto): Promise<SendVerificationCodeResponseDto> {
+        try {
+            this.logger.log(`Received send verification code request for email: ${dto.email}`);
+            const response = await this.loginEmailService.sendVerificationCode(dto);
+            
+            switch (response.status) {
+                case 409:
+                    throw new ConflictException(response.message);
+                case 403:
+                    throw new ForbiddenException(response.message);
+                case 500:
+                    throw new InternalServerErrorException(response.message);
+                default:
+                    return response;
+            }
+        } catch (error) {
+            if (error instanceof ConflictException || error instanceof ForbiddenException || error instanceof InternalServerErrorException) {
+                throw error;
+            }
+            this.logger.error(`Error in sendVerificationCode: ${error.message}`, error.stack);
+            throw new BadRequestException({
+                statusCode: 400,
+                message: error.message || 'Failed to send verification code',
                 error: 'Bad Request'
             });
         }
