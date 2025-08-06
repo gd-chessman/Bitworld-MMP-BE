@@ -898,14 +898,6 @@ export class LoginEmailService {
                 };
             }
 
-            // 2. Kiểm tra user có password không
-            if (!existingUser.uw_password) {
-                return {
-                    status: 400,
-                    message: 'This account does not have a password. Please use Google login.'
-                };
-            }
-
             // 3. Kiểm tra xem có code đang active không
             const now = new Date();
             const existingCode = await this.userWalletCodeRepository.findOne({
