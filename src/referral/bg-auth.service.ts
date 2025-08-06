@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, Inject, forwardRef, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Response } from 'express';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -10,9 +10,28 @@ import { TelegramWalletsService } from '../telegram-wallets/telegram-wallets.ser
 import { WalletAuth } from '../telegram-wallets/entities/wallet-auth.entity';
 import { UserWallet } from '../telegram-wallets/entities/user-wallet.entity';
 import { ListWallet } from '../telegram-wallets/entities/list-wallet.entity';
+import * as bcrypt from 'bcrypt';
+
+export interface ManualLoginDto {
+  email: string;
+  password: string;
+}
+
+export interface ManualLoginResponseDto {
+  message: string;
+  walletInfo: {
+    walletId: number;
+    nickName: string | null;
+    solanaAddress: string;
+    ethAddress: string;
+    email: string;
+  };
+}
 
 @Injectable()
 export class BgAuthService {
+  private readonly logger = new Logger(BgAuthService.name);
+
   constructor(
     private jwtService: JwtService,
     private bgRefService: BgRefService,
@@ -286,6 +305,122 @@ export class BgAuthService {
         }
       };
     } catch (error) {
+      throw new BadRequestException(error.message || 'Login failed');
+    }
+  }
+
+  async loginWithPassword(
+    body: ManualLoginDto,
+    response: Response
+  ): Promise<ManualLoginResponseDto> {
+    try {
+      // 1. Validation cơ bản
+      if (!body.email || !body.password) {
+        throw new BadRequestException('Email and password are required');
+      }
+
+      // 2. Kiểm tra format email
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(body.email)) {
+        throw new BadRequestException('Invalid email format');
+      }
+
+      // 3. Kiểm tra email có tồn tại không
+      const userWallet = await this.userWalletRepository.findOne({
+        where: { uw_email: body.email }
+      });
+
+      if (!userWallet) {
+        throw new BadRequestException('Account does not exist');
+      }
+
+      // 4. Kiểm tra user có password không (không phải Google login)
+      if (!userWallet.uw_password) {
+        throw new BadRequestException('This account does not have a password. Please use Google login');
+      }
+
+      // 5. Kiểm tra password
+      const isPasswordValid = await bcrypt.compare(body.password, userWallet.uw_password);
+      if (!isPasswordValid) {
+        throw new BadRequestException('Invalid password');
+      }
+
+      // 6. Kiểm tra email đã được xác thực chưa
+      if (!userWallet.active_email) {
+        throw new BadRequestException('Email not verified. Please verify your email first');
+      }
+
+      // 7. Lấy ví main của user
+      const mainWallet = await this.getMainWallet(userWallet);
+      if (!mainWallet) {
+        throw new BadRequestException('Main wallet not found for this account');
+      }
+
+      // 8. Kiểm tra ví có phải là ví main không
+      const isMainWallet = await this.checkMainWallet(mainWallet.wallet_id);
+      if (!isMainWallet) {
+        throw new BadRequestException('Login failed: Wallet is not a main wallet');
+      }
+
+      // 9. Kiểm tra ví có thuộc luồng BG affiliate không
+      const isBgAffiliate = await this.bgRefService.isWalletInBgAffiliateSystem(mainWallet.wallet_id);
+      if (!isBgAffiliate) {
+        throw new BadRequestException('Login failed: Wallet does not belong to BG affiliate system');
+      }
+
+      // 10. Tạo JWT payload với đầy đủ thông tin
+      const payload = {
+        uid: userWallet.uw_id,
+        wallet_id: mainWallet.wallet_id,
+        sol_public_key: mainWallet.wallet_solana_address,
+        eth_public_key: mainWallet.wallet_eth_address,
+        role: 'bg_affiliate'
+      };
+
+      // 11. Tạo access token (15 phút)
+      const accessToken = this.jwtService.sign(payload, {
+        secret: `${process.env.JWT_SECRET}-affiliate`,
+        expiresIn: '15m'
+      });
+
+      // 12. Tạo refresh token (7 ngày)
+      const refreshToken = this.jwtService.sign(
+        { ...payload, type: 'refresh' },
+        {
+          secret: `${process.env.JWT_SECRET}-affiliate`,
+          expiresIn: '7d'
+        }
+      );
+
+      // 13. Set HTTP-only cookies
+      response.cookie('bg_access_token', accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'none',
+        maxAge: 15 * 60 * 1000 // 15 phút
+      });
+
+      response.cookie('bg_refresh_token', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'none',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 ngày
+      });
+
+      return {
+        message: 'BG affiliate login successful',
+        walletInfo: {
+          walletId: mainWallet.wallet_id,
+          nickName: mainWallet.wallet_nick_name,
+          solanaAddress: mainWallet.wallet_solana_address,
+          ethAddress: mainWallet.wallet_eth_address,
+          email: userWallet.uw_email
+        }
+      };
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
       throw new BadRequestException(error.message || 'Login failed');
     }
   }

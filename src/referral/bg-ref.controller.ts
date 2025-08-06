@@ -2,7 +2,7 @@ import { Controller, Post, Get, Put, Body, Param, Query, UseGuards, Request, Res
 import { BgRefService } from './bg-ref.service';
 import { BgRefWithdrawService } from './services/bg-ref-withdraw.service';
 import { JwtBgAuthGuard } from './guards/jwt-bg-auth.guard';
-import { BgAuthService } from './bg-auth.service';
+import { BgAuthService, ManualLoginDto, ManualLoginResponseDto } from './bg-auth.service';
 import { Response } from 'express';
 import { UpdateBgAliasDto } from './dto/update-bg-alias.dto';
 
@@ -38,6 +38,17 @@ export class BgRefController {
     @Res({ passthrough: true }) response: Response
   ) {
     return await this.bgAuthService.loginEmail(body, response);
+  }
+
+  /**
+   * Login bằng email và mật khẩu cho BG affiliate
+   */
+  @Post('manual-login')
+  async loginPassword(
+    @Body() body: ManualLoginDto,
+    @Res({ passthrough: true }) response: Response
+  ): Promise<ManualLoginResponseDto> {
+    return await this.bgAuthService.loginWithPassword(body, response);
   }
 
   /**
