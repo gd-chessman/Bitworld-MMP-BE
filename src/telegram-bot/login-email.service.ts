@@ -14,10 +14,26 @@ import bs58 from 'bs58';
 import { ethers } from 'ethers';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
+import * as bcrypt from 'bcrypt';
 
 export interface GoogleLoginDto {
     code: string;  // Authorization code from Google
     refCode?: string; // Referral code (optional)
+}
+
+export interface ManualRegisterDto {
+    name: string;
+    nick_name: string;
+    country: string;
+    bittworld_uid?: string;
+    refCode?: string;
+    password: string;
+    email: string;
+}
+
+export interface ManualLoginDto {
+    email: string;
+    password: string;
 }
 
 export interface LoginResponse {
@@ -34,6 +50,49 @@ export interface LoginResponse {
                 ethereum: string;
                 nickname: string | null;
             };
+        };
+    };
+}
+
+export interface ManualRegisterResponseDto {
+    status: number;
+    message: string;
+    data?: {
+        user: {
+            id: number;
+            email: string;
+            name: string;
+            country: string;
+            bittworld_uid?: string;
+        };
+        wallet: {
+            id: number;
+            solana_address: string;
+            eth_address: string;
+            nick_name: string;
+            country: string;
+        };
+    };
+}
+
+export interface ManualLoginResponseDto {
+    status: number;
+    message: string;
+    data?: {
+        token: string;
+        user: {
+            id: number;
+            email: string;
+            name: string;
+            country: string;
+            bittworld_uid?: string;
+        };
+        wallet: {
+            id: number;
+            solana_address: string;
+            eth_address: string;
+            nick_name: string;
+            country: string;
         };
     };
 }
@@ -364,5 +423,268 @@ export class LoginEmailService {
                 }
             }
         };
+    }
+
+    async manualRegister(dto: ManualRegisterDto, req: Request): Promise<ManualRegisterResponseDto> {
+        try {
+            this.logger.log(`Starting manual registration for email: ${dto.email}`);
+
+            // Xác định isBittworld dựa trên domain (giống handleGoogleLogin)
+            const origin = req.headers.origin || req.headers.referer;
+            let frontendDomain = '';
+            if (origin) {
+                try {
+                    frontendDomain = new URL(origin).hostname.toLowerCase();
+                } catch {
+                    frontendDomain = origin.replace(/^https?:\/\//, '').replace(/^www\./, '');
+                }
+            }
+
+            const envDomain = this.configService.get<string>('BITTWORLD_DOMAIN', '').toLowerCase();
+            let bittworldDomain = '';
+            try {
+                bittworldDomain = new URL(envDomain).hostname.toLowerCase();
+            } catch {
+                bittworldDomain = envDomain.replace(/^https?:\/\//, '').replace(/^www\./, '');
+            }
+
+            const normalize = (domain: string) => domain.replace(/^www\./, '');
+            const isBittworld = !!bittworldDomain && normalize(frontendDomain) === normalize(bittworldDomain);
+
+            // 1. Kiểm tra email đã tồn tại chưa
+            const existingUser = await this.userWalletRepository.findOne({
+                where: { uw_email: dto.email }
+            });
+
+            if (existingUser) {
+                return {
+                    status: 409,
+                    message: 'Email already exists'
+                };
+            }
+
+            // 2. Kiểm tra nickname đã tồn tại chưa
+            const existingWallet = await this.listWalletRepository.findOne({
+                where: { wallet_nick_name: dto.nick_name }
+            });
+
+            if (existingWallet) {
+                return {
+                    status: 409,
+                    message: 'Nickname already exists'
+                };
+            }
+
+            // 3. Kiểm tra referral code nếu có
+            let referrerWallet: ListWallet | null = null;
+            if (dto.refCode) {
+                referrerWallet = await this.listWalletRepository.findOne({
+                    where: { wallet_code_ref: dto.refCode }
+                });
+
+                if (!referrerWallet) {
+                    return {
+                        status: 400,
+                        message: 'Invalid referral code'
+                    };
+                }
+            }
+
+            // 4. Hash password
+            const salt = await bcrypt.genSalt();
+            const hashedPassword = await bcrypt.hash(dto.password, salt);
+
+            // 5. Tạo user mới
+            const newUser = this.userWalletRepository.create({
+                uw_email: dto.email,
+                uw_password: hashedPassword,
+                active_email: true, // Tự động verify email cho manual register
+                isBittworld: isBittworld
+            });
+            await this.userWalletRepository.save(newUser);
+
+            // 6. Tạo wallet mới
+            const solanaKeypair = Keypair.generate();
+            const solanaPublicKey = solanaKeypair.publicKey.toBase58();
+            const solanaPrivateKey = bs58.encode(solanaKeypair.secretKey);
+
+            // Tạo Ethereum private key từ Solana private key
+            const ethPrivateKey = this.telegramBotService['deriveEthereumPrivateKey'](solanaKeypair.secretKey);
+            const ethWallet = new ethers.Wallet(ethPrivateKey);
+            const ethAddress = ethWallet.address;
+
+            // Generate referral code
+            const referralCode = await this.telegramBotService['generateUniqueReferralCode']();
+
+            // Tạo wallet mới
+            const newWallet = this.listWalletRepository.create({
+                wallet_private_key: JSON.stringify({
+                    solana: solanaPrivateKey,
+                    ethereum: ethPrivateKey
+                }),
+                wallet_solana_address: solanaPublicKey,
+                wallet_eth_address: ethAddress,
+                wallet_status: true,
+                wallet_auth: 'member',
+                wallet_nick_name: dto.nick_name,
+                wallet_country: dto.country,
+                wallet_code_ref: referralCode,
+                bittworld_uid: dto.bittworld_uid || undefined,
+                isBittworld: isBittworld
+            });
+            await this.listWalletRepository.save(newWallet);
+
+            // 7. Tạo wallet_auth link
+            const walletAuth = this.walletAuthRepository.create({
+                wa_user_id: newUser.uw_id,
+                wa_wallet_id: newWallet.wallet_id,
+                wa_type: 'main',
+                wa_name: dto.name
+            });
+            await this.walletAuthRepository.save(walletAuth);
+
+            // 8. Tạo referral relationship nếu có refCode
+            if (referrerWallet) {
+                const referralSuccess = await this.createReferralRelationship(newWallet.wallet_id, referrerWallet.wallet_id);
+                if (referralSuccess) {
+                    this.logger.log(`Successfully created referral relationship for user ${dto.email} with refCode ${dto.refCode}`);
+                } else {
+                    this.logger.warn(`Failed to create referral relationship for user ${dto.email} with refCode ${dto.refCode}`);
+                }
+            }
+
+            // 9. Tạo JWT token
+            const payload = {
+                uid: newUser.uw_id,
+                wallet_id: newWallet.wallet_id,
+                sol_public_key: newWallet.wallet_solana_address,
+                eth_public_key: newWallet.wallet_eth_address,
+            };
+            const tokenResponse = await this.authService.refreshToken(payload);
+
+            this.logger.log(`Manual registration successful for email: ${dto.email}`);
+
+            return {
+                status: 201,
+                message: 'Registration successful',
+                data: {
+                    user: {
+                        id: newUser.uw_id,
+                        email: newUser.uw_email,
+                        name: dto.name,
+                        country: dto.country,
+                        bittworld_uid: dto.bittworld_uid
+                    },
+                    wallet: {
+                        id: newWallet.wallet_id,
+                        solana_address: newWallet.wallet_solana_address,
+                        eth_address: newWallet.wallet_eth_address,
+                        nick_name: newWallet.wallet_nick_name,
+                        country: newWallet.wallet_country
+                    }
+                }
+            };
+
+        } catch (error) {
+            this.logger.error(`Error in manualRegister: ${error.message}`, error.stack);
+            return {
+                status: 500,
+                message: `Registration error: ${error.message}`
+            };
+        }
+    }
+
+    async manualLogin(dto: ManualLoginDto): Promise<ManualLoginResponseDto> {
+        try {
+            this.logger.log(`Starting manual login for email: ${dto.email}`);
+
+            // 1. Tìm user theo email
+            const user = await this.userWalletRepository.findOne({
+                where: { uw_email: dto.email },
+                relations: ['wallet_auths', 'wallet_auths.wa_wallet']
+            });
+
+            if (!user) {
+                return {
+                    status: 404,
+                    message: 'User not found'
+                };
+            }
+
+            // 2. Kiểm tra email đã được verify chưa
+            if (!user.active_email) {
+                return {
+                    status: 403,
+                    message: 'Email is not verified. Please verify your email first.'
+                };
+            }
+
+            // 3. Kiểm tra password
+            if (!user.uw_password) {
+                return {
+                    status: 400,
+                    message: 'Invalid login method. Please use Google login or reset your password.'
+                };
+            }
+
+            const isPasswordValid = await bcrypt.compare(dto.password, user.uw_password);
+            if (!isPasswordValid) {
+                return {
+                    status: 401,
+                    message: 'Invalid password'
+                };
+            }
+
+            // 4. Lấy main wallet
+            const mainWalletAuth = user.wallet_auths.find(auth => auth.wa_type === 'main');
+            if (!mainWalletAuth || !mainWalletAuth.wa_wallet) {
+                return {
+                    status: 404,
+                    message: 'Wallet not found'
+                };
+            }
+
+            const wallet = mainWalletAuth.wa_wallet;
+
+            // 5. Tạo JWT token
+            const payload = {
+                uid: user.uw_id,
+                wallet_id: wallet.wallet_id,
+                sol_public_key: wallet.wallet_solana_address,
+                eth_public_key: wallet.wallet_eth_address,
+            };
+            const tokenResponse = await this.authService.refreshToken(payload);
+
+            this.logger.log(`Manual login successful for email: ${dto.email}`);
+
+            return {
+                status: 200,
+                message: 'Login successful',
+                data: {
+                    token: tokenResponse.token,
+                    user: {
+                        id: user.uw_id,
+                        email: user.uw_email,
+                        name: mainWalletAuth.wa_name || '',
+                        country: wallet.wallet_country,
+                        bittworld_uid: wallet.bittworld_uid
+                    },
+                    wallet: {
+                        id: wallet.wallet_id,
+                        solana_address: wallet.wallet_solana_address,
+                        eth_address: wallet.wallet_eth_address,
+                        nick_name: wallet.wallet_nick_name,
+                        country: wallet.wallet_country
+                    }
+                }
+            };
+
+        } catch (error) {
+            this.logger.error(`Error in manualLogin: ${error.message}`, error.stack);
+            return {
+                status: 500,
+                message: `Login error: ${error.message}`
+            };
+        }
     }
 } 
