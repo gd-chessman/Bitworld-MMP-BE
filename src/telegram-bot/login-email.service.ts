@@ -43,6 +43,16 @@ export interface SendVerificationCodeDto {
     email: string;
 }
 
+export interface ForgotPasswordDto {
+    email: string;
+}
+
+export interface ChangePasswordDto {
+    email: string;
+    code: string;
+    newPassword: string;
+}
+
 export interface LoginResponse {
     status: number;
     message: string;
@@ -105,6 +115,16 @@ export interface ManualLoginResponseDto {
 }
 
 export interface SendVerificationCodeResponseDto {
+    status: number;
+    message: string;
+}
+
+export interface ForgotPasswordResponseDto {
+    status: number;
+    message: string;
+}
+
+export interface ChangePasswordResponseDto {
     status: number;
     message: string;
 }
@@ -857,5 +877,158 @@ export class LoginEmailService {
             code += digits[Math.floor(Math.random() * digits.length)];
         }
         return code;
+    }
+
+    async forgotPassword(dto: ForgotPasswordDto): Promise<ForgotPasswordResponseDto> {
+        try {
+            this.logger.log(`Starting forgot password process for email: ${dto.email}`);
+
+            // 1. Kiểm tra user tồn tại và đã active
+            const existingUser = await this.userWalletRepository.findOne({
+                where: { 
+                    uw_email: dto.email,
+                    active_email: true
+                }
+            });
+
+            if (!existingUser) {
+                return {
+                    status: 404,
+                    message: 'User not found or email not verified'
+                };
+            }
+
+            // 2. Kiểm tra user có password không
+            if (!existingUser.uw_password) {
+                return {
+                    status: 400,
+                    message: 'This account does not have a password. Please use Google login.'
+                };
+            }
+
+            // 3. Kiểm tra xem có code đang active không
+            const now = new Date();
+            const existingCode = await this.userWalletCodeRepository.findOne({
+                where: {
+                    tw_wallet_id: existingUser.uw_id,
+                    tw_code_type: 5, // Loại code cho forgot password
+                    tw_code_status: true,
+                    tw_code_time: MoreThan(now)
+                }
+            });
+
+            if (existingCode) {
+                return {
+                    status: 403,
+                    message: 'A reset code is already active. Please wait for it to expire or use the existing code.'
+                };
+            }
+
+            // 4. Tạo code mới (6 chữ số)
+            const code = this.generateRandomCode(6);
+            const threeMinutesLater = new Date(now.getTime() + 3 * 60 * 1000); // UTC + 3 phút
+
+            // 5. Lưu code vào database
+            const newCode = this.userWalletCodeRepository.create({
+                tw_wallet_id: existingUser.uw_id,
+                tw_code_type: 5, // Loại code cho forgot password
+                tw_code_status: true,
+                tw_code_time: threeMinutesLater,
+                tw_code_value: code
+            });
+            await this.userWalletCodeRepository.save(newCode);
+
+            // 6. Gửi code qua email
+            try {
+                await this.notificationService.sendPasswordResetCodeEmail(dto.email, code);
+                this.logger.log(`Password reset code sent successfully to email: ${dto.email}`);
+            } catch (emailError) {
+                this.logger.error(`Error sending password reset code email: ${emailError.message}`);
+                // Xóa code nếu gửi email thất bại
+                await this.userWalletCodeRepository.remove(newCode);
+                return {
+                    status: 500,
+                    message: 'Failed to send reset code. Please try again later.'
+                };
+            }
+
+            return {
+                status: 200,
+                message: 'Password reset code has been sent to your email'
+            };
+
+        } catch (error) {
+            this.logger.error(`Error in forgotPassword: ${error.message}`, error.stack);
+            return {
+                status: 500,
+                message: `Failed to send reset code: ${error.message}`
+            };
+        }
+    }
+
+    async changePassword(dto: ChangePasswordDto): Promise<ChangePasswordResponseDto> {
+        try {
+            this.logger.log(`Starting change password process for email: ${dto.email}`);
+
+            // 1. Kiểm tra user tồn tại và đã active
+            const existingUser = await this.userWalletRepository.findOne({
+                where: { 
+                    uw_email: dto.email,
+                    active_email: true
+                }
+            });
+
+            if (!existingUser) {
+                return {
+                    status: 404,
+                    message: 'User not found or email not verified'
+                };
+            }
+
+            // 2. Kiểm tra reset code
+            const now = new Date();
+            const resetCode = await this.userWalletCodeRepository.findOne({
+                where: {
+                    tw_wallet_id: existingUser.uw_id,
+                    tw_code_type: 5, // Loại code cho forgot password
+                    tw_code_status: true,
+                    tw_code_value: dto.code,
+                    tw_code_time: MoreThan(now)
+                }
+            });
+
+            if (!resetCode) {
+                return {
+                    status: 400,
+                    message: 'Invalid or expired reset code'
+                };
+            }
+
+            // 3. Hash password mới
+            const salt = await bcrypt.genSalt();
+            const hashedPassword = await bcrypt.hash(dto.newPassword, salt);
+
+            // 4. Cập nhật password
+            existingUser.uw_password = hashedPassword;
+            await this.userWalletRepository.save(existingUser);
+
+            // 5. Đánh dấu code đã sử dụng
+            resetCode.tw_code_status = false;
+            await this.userWalletCodeRepository.save(resetCode);
+
+            this.logger.log(`Password changed successfully for email: ${dto.email}`);
+
+            return {
+                status: 200,
+                message: 'Password changed successfully'
+            };
+
+        } catch (error) {
+            this.logger.error(`Error in changePassword: ${error.message}`, error.stack);
+            return {
+                status: 500,
+                message: `Failed to change password: ${error.message}`
+            };
+        }
     }
 } 
