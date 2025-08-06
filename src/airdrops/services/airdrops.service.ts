@@ -673,14 +673,28 @@ export class AirdropsService {
                 // Tổng volume = volume ban đầu + tổng volume stake
                 const totalPoolVolume = Number(pool.apl_volume) + totalStakeVolume;
 
-                // 7. Tạo thông tin pool với user info
+                // 7. Tính số lượng member thực tế từ stake records (bao gồm creator)
+                const uniqueMembers = new Set<number>();
+                
+                // Thêm creator vào member count (luôn được tính)
+                uniqueMembers.add(pool.alp_originator);
+                
+                // Thêm tất cả members từ stake records (Set tự động loại trùng lặp)
+                // Nếu creator cũng tồn tại trong stake records, sẽ được loại trùng lặp tự động
+                for (const stake of allPoolStakes) {
+                    uniqueMembers.add(stake.apj_member);
+                }
+                
+                const actualMemberCount = uniqueMembers.size;
+
+                // 8. Tạo thông tin pool với user info
                 const poolInfo: PoolInfoDto = {
                     poolId: pool.alp_id,
                     name: pool.alp_name,
                     slug: pool.alp_slug,
                     logo: pool.alp_logo || '',
                     describe: pool.alp_describe || '',
-                    memberCount: pool.alp_member_num,
+                    memberCount: actualMemberCount,
                     totalVolume: totalPoolVolume,
                     creationDate: pool.apl_creation_date,
                     endDate: pool.apl_end_date,
@@ -689,7 +703,7 @@ export class AirdropsService {
                     creatorBittworldUid: creatorWallet?.bittworld_uid || null
                 };
 
-                // 8. Thêm thông tin stake của user nếu có
+                // 9. Thêm thông tin stake của user nếu có
                 if (userStakes.length > 0 || isCreator) {
                     // Lấy ngày stake đầu tiên hoặc ngày tạo pool
                     const firstStakeDate = userStakes.length > 0 
@@ -801,14 +815,28 @@ export class AirdropsService {
             // Total volume = initial volume + total stake volume
             const totalPoolVolume = Number(pool.apl_volume) + totalStakeVolume;
 
-            // 8. Create basic pool information
+            // 8. Calculate actual member count from stake records (including creator)
+            const uniqueMembers = new Set<number>();
+            
+            // Add creator to member count (always included)
+            uniqueMembers.add(pool.alp_originator);
+            
+            // Add all members from stake records (Set automatically handles duplicates)
+            // If creator also exists in stake records, it will be deduplicated automatically
+            for (const stake of allPoolStakes) {
+                uniqueMembers.add(stake.apj_member);
+            }
+            
+            const actualMemberCount = uniqueMembers.size;
+
+            // 9. Create basic pool information
             const poolDetail: PoolDetailDto = {
                 poolId: pool.alp_id,
                 name: pool.alp_name,
                 slug: pool.alp_slug,
                 logo: pool.alp_logo || '',
                 describe: pool.alp_describe || '',
-                memberCount: pool.alp_member_num,
+                memberCount: actualMemberCount,
                 totalVolume: totalPoolVolume,
                 creationDate: pool.apl_creation_date,
                 endDate: pool.apl_end_date,
@@ -818,7 +846,7 @@ export class AirdropsService {
                 creatorBittworldUid: creatorWallet?.bittworld_uid || null
             };
 
-            // 9. Add user stake information if exists
+            // 10. Add user stake information if exists
             if (userStakes.length > 0 || isCreator) {
                 const firstStakeDate = userStakes.length > 0 
                     ? userStakes[0].apj_stake_date 
@@ -833,7 +861,7 @@ export class AirdropsService {
                 };
             }
 
-            // 10. If user is creator, get all members list
+            // 11. If user is creator, get all members list
             if (isCreator) {
                 const members = await this.getPoolMembers(poolId, query);
                 poolDetail.members = members;
@@ -1682,14 +1710,28 @@ export class AirdropsService {
             // Total volume = initial volume + total stake volume
             const totalPoolVolume = Number(pool.apl_volume) + totalStakeVolume;
 
-            // 8. Create basic pool information
+            // 8. Calculate actual member count from stake records (including creator)
+            const uniqueMembers = new Set<number>();
+            
+            // Add creator to member count (always included)
+            uniqueMembers.add(pool.alp_originator);
+            
+            // Add all members from stake records (Set automatically handles duplicates)
+            // If creator also exists in stake records, it will be deduplicated automatically
+            for (const stake of allPoolStakes) {
+                uniqueMembers.add(stake.apj_member);
+            }
+            
+            const actualMemberCount = uniqueMembers.size;
+
+            // 9. Create basic pool information
             const poolDetail: PoolDetailTransactionsDto = {
                 poolId: pool.alp_id,
                 name: pool.alp_name,
                 slug: pool.alp_slug,
                 logo: pool.alp_logo || '',
                 describe: pool.alp_describe || '',
-                memberCount: pool.alp_member_num,
+                memberCount: actualMemberCount,
                 totalVolume: totalPoolVolume,
                 creationDate: pool.apl_creation_date,
                 endDate: pool.apl_end_date,
@@ -1700,7 +1742,7 @@ export class AirdropsService {
                 transactions: []
             };
 
-            // 9. Add user stake information if exists
+            // 10. Add user stake information if exists
             if (userStakes.length > 0 || isCreator) {
                 const firstStakeDate = userStakes.length > 0 
                     ? userStakes[0].apj_stake_date 
@@ -1715,7 +1757,7 @@ export class AirdropsService {
                 };
             }
 
-            // 10. Get all transactions in the pool
+            // 11. Get all transactions in the pool
             const transactions = await this.getPoolTransactions(poolId, query);
             poolDetail.transactions = transactions;
 

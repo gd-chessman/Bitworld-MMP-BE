@@ -2568,6 +2568,20 @@ export class AdminService implements OnModuleInit {
       // Total volume = initial volume + total stake volume
       const apl_total_volume = Number(pool.apl_volume) + totalStakeVolume;
 
+      // Calculate actual member count from stake records (including creator)
+      const uniqueMembers = new Set<number>();
+      
+      // Add creator to member count (always included)
+      uniqueMembers.add(pool.alp_originator);
+      
+      // Add all members from stake records (Set automatically handles duplicates)
+      // If creator also exists in stake records, it will be deduplicated automatically
+      for (const stake of allPoolStakes) {
+        uniqueMembers.add(stake.apj_member);
+      }
+      
+      const actualMemberCount = uniqueMembers.size;
+
       return {
         alp_id: pool.alp_id,
         alp_originator: pool.alp_originator,
@@ -2575,7 +2589,7 @@ export class AdminService implements OnModuleInit {
         alp_slug: pool.alp_slug,
         alp_describe: pool.alp_describe,
         alp_logo: pool.alp_logo,
-        alp_member_num: pool.alp_member_num,
+        alp_member_num: actualMemberCount,
         apl_volume: Number(pool.apl_volume),
         apl_total_volume: apl_total_volume,
         apl_creation_date: pool.apl_creation_date,
@@ -2610,15 +2624,12 @@ export class AdminService implements OnModuleInit {
       where: { apl_status: AirdropPoolStatus.ACTIVE }
     });
 
-    // Get total members and initial volume across all pools
+    // Get initial volume across all pools
     const totalStats = await this.airdropListPoolRepository
       .createQueryBuilder('pool')
-      .select('SUM(pool.alp_member_num)', 'totalMembers')
-      .addSelect('SUM(pool.apl_volume)', 'initialVolume')
+      .select('SUM(pool.apl_volume)', 'initialVolume')
       .getRawOne();
 
-      
-    const totalMembers = parseInt(totalStats?.totalMembers || '0');
     const initialVolume = parseFloat(totalStats?.initialVolume || '0');
 
     // Get total stake volume from airdrop_pool_joins table
@@ -2629,6 +2640,30 @@ export class AdminService implements OnModuleInit {
       .getRawOne();
 
     const totalStakeVolume = parseFloat(stakeVolumeStats?.totalStakeVolume || '0');
+
+    // Calculate actual total unique members count across all pools
+    const allPools = await this.airdropListPoolRepository.find();
+    const allUniqueMembers = new Set<number>();
+
+    for (const pool of allPools) {
+      // Get all stake records for this pool
+      const allPoolStakes = await this.airdropPoolJoinRepository.find({
+        where: {
+          apj_pool_id: pool.alp_id,
+          apj_status: AirdropPoolJoinStatus.ACTIVE
+        }
+      });
+
+      // Add creator to unique members set (always included)
+      allUniqueMembers.add(pool.alp_originator);
+      
+      // Add all members from stake records (Set automatically handles duplicates across pools)
+      for (const stake of allPoolStakes) {
+        allUniqueMembers.add(stake.apj_member);
+      }
+    }
+
+    const totalMembers = allUniqueMembers.size;
 
     // Total volume = initial volume + total stake volume
     const totalVolume = initialVolume + totalStakeVolume;
@@ -2686,6 +2721,20 @@ export class AdminService implements OnModuleInit {
     // Total volume = initial volume + total stake volume
     const totalVolume = Number(pool.apl_volume) + totalStakeVolume;
 
+    // Calculate actual member count from stake records (including creator)
+    const uniqueMembers = new Set<number>();
+    
+    // Add creator to member count (always included)
+    uniqueMembers.add(pool.alp_originator);
+    
+    // Add all members from stake records (Set automatically handles duplicates)
+    // If creator also exists in stake records, it will be deduplicated automatically
+    for (const stake of allPoolStakes) {
+      uniqueMembers.add(stake.apj_member);
+    }
+    
+    const actualMemberCount = uniqueMembers.size;
+
     // Get all transactions in the pool
     const transactions = await this.getAirdropPoolTransactions(pool.alp_id);
 
@@ -2698,7 +2747,7 @@ export class AdminService implements OnModuleInit {
       slug: pool.alp_slug,
       logo: pool.alp_logo,
       describe: pool.alp_describe,
-      memberCount: pool.alp_member_num,
+      memberCount: actualMemberCount,
       totalVolume: totalVolume,
       creationDate: pool.apl_creation_date,
       endDate: pool.apl_end_date,
