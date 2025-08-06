@@ -1,5 +1,5 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, Query, UseGuards, Request, Res, HttpCode, UseInterceptors, UploadedFile } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { CategoryResponseDto } from './dto/category-response.dto';
 import { CategoryPrioritize, CategoryStatus } from '../solana/entities/solana-list-categories-token.entity';

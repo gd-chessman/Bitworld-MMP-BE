@@ -432,7 +432,7 @@ export class AdminService implements OnModuleInit {
     }
 
     if (search) {
-      whereConditions.push('(wallet.wallet_nick_name ILIKE :search OR CAST(wallet.wallet_id AS TEXT) ILIKE :search OR wallet.wallet_solana_address ILIKE :search OR wallet.bittworld_uid ILIKE :search)');
+      whereConditions.push('(wallet.wallet_nick_name ILIKE :search OR CAST(wallet.wallet_id AS TEXT) ILIKE :search OR wallet.wallet_solana_address ILIKE :search OR wallet.bittworld_uid ILIKE :search OR user_wallet.uw_email ILIKE :search)');
       parameters['search'] = `%${search}%`;
     }
 
