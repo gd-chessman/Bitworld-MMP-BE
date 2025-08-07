@@ -157,13 +157,41 @@ This code will expire in 5 minutes.
         });
 
         const subject = 'Password Reset Code';
-        const body = `Your password reset code is: ${code}\n\nThis code will expire in 3 minutes.\nIf you did not request a password reset, please ignore this email.`;
+        const htmlBody = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #333; font-size: 24px; margin-bottom: 20px;">🔐 Password Reset Code</h2>
+                
+                <p style="font-size: 16px; color: #555; margin-bottom: 15px;">
+                    Your password reset code is:
+                </p>
+                
+                <div style="background-color: #f8f9fa; border: 2px solid #007bff; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0;">
+                    <span style="font-size: 32px; font-weight: bold; color: #007bff; letter-spacing: 4px;">${code}</span>
+                </div>
+                
+                <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
+                    <strong>⚠️ Important:</strong> This code will expire in 3 minutes.
+                </p>
+                
+                <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
+                    If you did not request a password reset, please ignore this email.
+                </p>
+                
+                <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                <p style="font-size: 12px; color: #999; text-align: center;">
+                    This is an automated message. Please do not reply to this email.
+                </p>
+            </div>
+        `;
+
+        const textBody = `Your password reset code is: ${code}\n\nThis code will expire in 3 minutes.\nIf you did not request a password reset, please ignore this email.`;
 
         await transporter.sendMail({
             from: `"${fromName}" <${fromEmail}>`,
             to,
             subject,
-            text: body,
+            text: textBody,
+            html: htmlBody,
         });
     }
 
@@ -190,13 +218,45 @@ This code will expire in 5 minutes.
         });
 
         const subject = 'Email Verification Code';
-        const body = `Your email verification code is: ${code}\n\nThis code will expire in 3 minutes.\nPlease use this code to complete your registration.\n\nIf you did not request this verification code, please ignore this email.`;
+        const htmlBody = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #333; font-size: 24px; margin-bottom: 20px;">📧 Email Verification Code</h2>
+                
+                <p style="font-size: 16px; color: #555; margin-bottom: 15px;">
+                    Your email verification code is:
+                </p>
+                
+                <div style="background-color: #f8f9fa; border: 2px solid #28a745; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0;">
+                    <span style="font-size: 32px; font-weight: bold; color: #28a745; letter-spacing: 4px;">${code}</span>
+                </div>
+                
+                <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
+                    <strong>⚠️ Important:</strong> This code will expire in 3 minutes.
+                </p>
+                
+                <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
+                    Please use this code to complete your registration.
+                </p>
+                
+                <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
+                    If you did not request this verification code, please ignore this email.
+                </p>
+                
+                <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                <p style="font-size: 12px; color: #999; text-align: center;">
+                    This is an automated message. Please do not reply to this email.
+                </p>
+            </div>
+        `;
+
+        const textBody = `Your email verification code is: ${code}\n\nThis code will expire in 3 minutes.\nPlease use this code to complete your registration.\n\nIf you did not request this verification code, please ignore this email.`;
 
         await transporter.sendMail({
             from: `"${fromName}" <${fromEmail}>`,
             to,
             subject,
-            text: body,
+            text: textBody,
+            html: htmlBody,
         });
     }
 } 
