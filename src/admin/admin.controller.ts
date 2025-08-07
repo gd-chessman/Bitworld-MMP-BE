@@ -555,8 +555,11 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Swap settings updated successfully' })
   @ApiResponse({ status: 400, description: 'Invalid input data' })
   @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can update swap settings' })
-  async updateSwapSettings(@Body() updateSwapSettingDto: UpdateSwapSettingDto) {
-    return await this.adminService.updateSwapSettings(updateSwapSettingDto);
+  async updateSwapSettings(
+    @Body() updateSwapSettingDto: UpdateSwapSettingDto,
+    @Request() req: any
+  ) {
+    return await this.adminService.updateSwapSettings(updateSwapSettingDto, req.user);
   }
 
   @UseGuards(JwtAuthAdminGuard)

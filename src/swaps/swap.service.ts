@@ -526,14 +526,17 @@ export class SwapService {
 
       // 2. Validate wallet address exists on Solana blockchain
       try {
-        const publicKey = new PublicKey(wallet_address);
-        const accountInfo = await this.connection.getAccountInfo(publicKey);
-        
-        if (!accountInfo) {
-          throw new BadRequestException('Invalid wallet address');
+        if (!wallet_address || typeof wallet_address !== 'string' || wallet_address.trim() === '') {
+          throw new BadRequestException('Wallet address is required and must be a valid string');
         }
+
+        // Kiểm tra format địa chỉ Solana
+        new PublicKey(wallet_address);
       } catch (error) {
-        throw new BadRequestException('Invalid wallet address');
+        if (error instanceof BadRequestException) {
+          throw error;
+        }
+        throw new BadRequestException('Invalid wallet address format');
       }
 
       // 3. Lấy giá SOL hiện tại để tính USD
@@ -573,10 +576,7 @@ export class SwapService {
       }
 
       // 6. Gửi token thực tế từ user wallet về exchange wallet
-      const exchangeWalletAddress = this.configService.get<string>('EXCHANGE_WALLET_ADDRESS');
-      if (!exchangeWalletAddress) {
-        throw new BadRequestException('Exchange wallet address not configured');
-      }
+      const exchangeWalletAddress = this.swapAuthorityKeypair.publicKey.toBase58();
 
       let transactionSignature: string | null = null;
 
@@ -599,6 +599,21 @@ export class SwapService {
 
         this.logger.log(`Token transfer successful. Signature: ${transactionSignature}`);
       } catch (transferError) {
+        if (transferError.message.includes('insufficient lamports')) {
+          throw new BadRequestException('Insufficient SOL for transaction fees');
+        }
+        if (transferError.message.includes('insufficient funds for rent')) {
+          throw new BadRequestException('Insufficient SOL balance');
+        }
+        if (transferError.message.includes('insufficient balance')) {
+          throw new BadRequestException('Insufficient token balance');
+        }
+        if (transferError.message.includes('insufficient funds')) {
+          throw new BadRequestException('Insufficient funds');
+        }
+        if (transferError.message.includes('Attempt to debit an account but found no record of a prior credit')) {
+          throw new BadRequestException('Insufficient SOL balance');
+        }
         this.logger.error(`Token transfer failed: ${transferError.message}`);
         throw new BadRequestException(`Token transfer failed: ${transferError.message}`);
       }
@@ -608,46 +623,9 @@ export class SwapService {
       investor.amount_usdt = newAmountUsdt;
       investor.amount_usd = newAmountUsd;
 
-      // 7. Cập nhật coins dựa trên loại token được góp
-      let currentCoins: string[] = [];
-      if (investor.coins) {
-        if (typeof investor.coins === 'string') {
-          try {
-            const parsed = JSON.parse(investor.coins);
-            currentCoins = Array.isArray(parsed) ? parsed : [];
-          } catch (e) {
-            currentCoins = [];
-          }
-        } else if (Array.isArray(investor.coins)) {
-          currentCoins = investor.coins;
-        }
-      }
-
-      // Thêm coin hiện tại vào danh sách nếu chưa có
-      const currentCoin = contributeCapitalDto.contribution_type.toUpperCase();
-      if (!currentCoins.includes(currentCoin)) {
-        currentCoins.push(currentCoin);
-      }
-      investor.coins = currentCoins;
-
       const savedInvestor = await this.swapInvestorsRepository.save(investor);
 
       this.logger.log(`Capital contribution: Investor ${wallet_address} contributed ${contributeCapitalDto.amount} ${contributeCapitalDto.contribution_type.toUpperCase()}`);
-
-      // Xử lý coins cho response
-      let responseCoins: string[] = [];
-      if (savedInvestor.coins) {
-        if (typeof savedInvestor.coins === 'string') {
-          try {
-            const parsed = JSON.parse(savedInvestor.coins);
-            responseCoins = Array.isArray(parsed) ? parsed : [];
-          } catch (e) {
-            responseCoins = [];
-          }
-        } else if (Array.isArray(savedInvestor.coins)) {
-          responseCoins = savedInvestor.coins;
-        }
-      }
 
       return {
         success: true,
@@ -655,7 +633,7 @@ export class SwapService {
         data: {
           swap_investor_id: savedInvestor.swap_investor_id,
           wallet_address: savedInvestor.wallet_address,
-          coins: responseCoins,
+          coins: null, // Bỏ hết logic xử lý coins
           amount_sol: Number(savedInvestor.amount_sol),
           amount_usdt: Number(savedInvestor.amount_usdt),
           amount_usd: Number(savedInvestor.amount_usd),

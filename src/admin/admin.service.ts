@@ -2253,10 +2253,33 @@ export class AdminService implements OnModuleInit {
       .take(limit)
       .getMany();
 
+    // Tính toán coins dựa trên amount_sol và amount_usdt
+    const investorsWithCoins = investors.map(investor => {
+      const coins: string[] = [];
+      
+      // Nếu có amount_sol > 0 thì thêm SOL
+      if (Number(investor.amount_sol) > 0) {
+        coins.push('SOL');
+      }
+      
+      // Nếu có amount_usdt > 0 thì thêm USDT
+      if (Number(investor.amount_usdt) > 0) {
+        coins.push('USDT');
+      }
+
+      return {
+        ...investor,
+        coins: coins.length > 0 ? coins : null,
+        amount_sol: Number(investor.amount_sol),
+        amount_usdt: Number(investor.amount_usdt),
+        amount_usd: Number(investor.amount_usd)
+      };
+    });
+
     return {
       success: true,
       message: 'Investors retrieved successfully',
-      data: investors,
+      data: investorsWithCoins,
       pagination: {
         page,
         limit,
@@ -2331,7 +2354,12 @@ export class AdminService implements OnModuleInit {
   }
 
   // Update swap settings
-  async updateSwapSettings(updateSwapSettingDto: UpdateSwapSettingDto) {
+  async updateSwapSettings(updateSwapSettingDto: UpdateSwapSettingDto, currentUser?: UserAdmin) {
+    // Kiểm tra quyền admin
+    if (!currentUser || currentUser.role !== AdminRole.ADMIN) {
+      throw new ForbiddenException('Only admin can update swap settings');
+    }
+
     // Get current settings to validate
     const existingSettings = await this.swapSettingsRepository.findOne({
       where: {}
