@@ -20,6 +20,7 @@ import { getAssociatedTokenAddress } from '@solana/spl-token';
 import bs58 from 'bs58';
 import { RedisLockService } from '../../common/services/redis-lock.service';
 import { CloudinaryService } from '../../common/cloudinary/cloudinary.service';
+import { UpdatePoolDto } from '../dto/update-pool.dto';
 
 @Injectable()
 export class AirdropsService {
@@ -274,6 +275,92 @@ export class AirdropsService {
                 });
             }
         }, this.LOCK_TTL * 1000); // Convert to milliseconds
+    }
+
+    async updatePool(walletId: number, poolIdOrSlug: string, updatePoolDto: UpdatePoolDto, logoFile?: Express.Multer.File) {
+        try {
+            // 1. Find pool by ID or slug
+            const isNumeric = !isNaN(Number(poolIdOrSlug));
+            
+            let pool;
+            if (isNumeric) {
+                // Find by ID
+                pool = await this.airdropListPoolRepository.findOne({
+                    where: { alp_id: parseInt(poolIdOrSlug) }
+                });
+            } else {
+                // Find by slug
+                pool = await this.airdropListPoolRepository.findOne({
+                    where: { alp_slug: poolIdOrSlug }
+                });
+            }
+
+            if (!pool) {
+                throw new BadRequestException('Pool does not exist');
+            }
+
+            // 2. Check if user is the creator of the pool
+            if (pool.alp_originator !== walletId) {
+                throw new BadRequestException('Only the pool creator can update the pool');
+            }
+
+            // 3. Process logo if provided
+            let logoUrl = updatePoolDto.logo;
+            
+            if (logoFile) {
+                try {
+                    // Upload file to Cloudinary using CloudinaryService
+                    logoUrl = await this.cloudinaryService.uploadAirdropLogo(logoFile);
+                    this.logger.log(`Logo uploaded successfully: ${logoUrl}`);
+                } catch (error) {
+                    this.logger.error(`Error uploading logo: ${error.message}`);
+                    throw new BadRequestException('Cannot upload logo. Please try again.');
+                }
+            }
+
+            // 4. Prepare update data (only update fields that are provided)
+            const updateData: any = {};
+            
+            if (logoUrl !== undefined) {
+                updateData.alp_logo = logoUrl;
+            }
+            
+            if (updatePoolDto.describe !== undefined) {
+                updateData.alp_describe = updatePoolDto.describe;
+            }
+
+            // 5. Update pool
+            await this.airdropListPoolRepository.update(
+                { alp_id: pool.alp_id },
+                updateData
+            );
+
+            // 6. Get updated pool data
+            const updatedPool = await this.airdropListPoolRepository.findOne({
+                where: { alp_id: pool.alp_id }
+            });
+
+            if (!updatedPool) {
+                throw new BadRequestException('Failed to update pool');
+            }
+
+            return {
+                success: true,
+                message: 'Pool updated successfully',
+                data: {
+                    poolId: updatedPool.alp_id,
+                    name: updatedPool.alp_name,
+                    slug: updatedPool.alp_slug,
+                    logo: updatedPool.alp_logo,
+                    describe: updatedPool.alp_describe,
+                    status: updatedPool.apl_status
+                }
+            };
+
+        } catch (error) {
+            this.logger.error(`Error updating pool: ${error.message}`);
+            throw error;
+        }
     }
 
     async stakePool(walletId: number, stakePoolDto: StakePoolDto) {

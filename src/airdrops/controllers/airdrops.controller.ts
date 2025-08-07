@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, UseGuards, Request, HttpStatus, Param, Query, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards, Request, HttpStatus, Param, Query, UseInterceptors, UploadedFile, Put } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiConsumes } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
@@ -14,6 +14,8 @@ import { GetPoolDetailDto } from '../dto/get-pool-detail.dto';
 import { GetPoolsDto } from '../dto/get-pools.dto';
 import { GetPoolDetailTransactionsResponseDto } from '../dto/get-pool-detail-transactions-response.dto';
 import { GetPoolDetailTransactionsDto } from '../dto/get-pool-detail-transactions.dto';
+import { UpdatePoolDto } from '../dto/update-pool.dto';
+import { UpdatePoolResponseDto } from '../dto/update-pool-response.dto';
 
 @ApiTags('Airdrops')
 @Controller('airdrops')
@@ -26,7 +28,7 @@ export class AirdropsController {
     @UseInterceptors(FileInterceptor('logo'))
     @ApiOperation({
         summary: 'Create new airdrop pool',
-        description: 'Create a new airdrop pool with token X. Supports logo file upload or URL. Requires minimum 1,000,000 token X.'
+        description: 'Create a new airdrop pool with token X. Logo is optional - can be uploaded as file or provided as URL. Requires minimum 1,000,000 token X.'
     })
     @ApiConsumes('multipart/form-data')
     @ApiResponse({
@@ -59,6 +61,51 @@ export class AirdropsController {
         }
 
         return await this.airdropsService.createPool(walletId, createPoolDto, logoFile);
+    }
+
+    @Put('pool/:idOrSlug')
+    @UseInterceptors(FileInterceptor('logo'))
+    @ApiOperation({
+        summary: 'Update airdrop pool logo and description',
+        description: 'Update logo and description of an airdrop pool. Only the pool creator can update the pool. Logo is optional - can be uploaded as file or provided as URL.'
+    })
+    @ApiParam({
+        name: 'idOrSlug',
+        description: 'ID or slug of the pool (e.g., 1 or "my-airdrop-pool-1")',
+        example: 'my-airdrop-pool-1'
+    })
+    @ApiConsumes('multipart/form-data')
+    @ApiResponse({
+        status: HttpStatus.OK,
+        description: 'Pool updated successfully',
+        type: UpdatePoolResponseDto
+    })
+    @ApiResponse({
+        status: HttpStatus.BAD_REQUEST,
+        description: 'Pool not found or user is not the pool creator'
+    })
+    @ApiResponse({
+        status: HttpStatus.UNAUTHORIZED,
+        description: 'Unauthorized access'
+    })
+    @ApiResponse({
+        status: HttpStatus.INTERNAL_SERVER_ERROR,
+        description: 'Server error'
+    })
+    async updatePool(
+        @Param('idOrSlug') idOrSlug: string,
+        @Body() updatePoolDto: UpdatePoolDto,
+        @Request() req: any,
+        @UploadedFile() logoFile?: Express.Multer.File
+    ) {
+        // Get wallet_id from JWT token
+        const walletId = req.user.wallet_id;
+        
+        if (!walletId) {
+            throw new Error('Wallet ID not found in token');
+        }
+
+        return await this.airdropsService.updatePool(walletId, idOrSlug, updatePoolDto, logoFile);
     }
 
     @Post('stake-pool')

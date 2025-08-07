@@ -12,13 +12,12 @@ export class CreatePoolDto {
     name: string;
 
     @ApiProperty({
-        description: 'Logo URL of the pool (supports URL or file upload)',
+        description: 'Logo URL of the pool (optional - can be uploaded as file or provided as URL)',
         example: 'https://example.com/logo.png',
         required: false
     })
     @IsOptional()
     @IsString()
-    @IsUrl({}, { message: 'Logo must be a valid URL' })
     logo?: string;
 
     @ApiProperty({

@@ -199,6 +199,15 @@ describe: "Mô tả chi tiết về pool"
 initialAmount: 1000000
 ```
 
+**Request Body (JSON - không có logo):**
+```json
+{
+  "name": "My Airdrop Pool",
+  "describe": "Mô tả chi tiết về pool",
+  "initialAmount": 1000000
+}
+```
+
 **Response:**
 ```json
 {
@@ -219,8 +228,74 @@ initialAmount: 1000000
 **Validation Rules:**
 - `initialAmount`: Tối thiểu 1,000,000 token X
 - `name`: Bắt buộc, không được rỗng
-- `logo`: Bắt buộc, URL hợp lệ
+- `logo`: Tùy chọn, có thể là URL hoặc file upload
 - `describe`: Tùy chọn
+
+### Update Pool API
+
+#### PUT /api/v1/airdrops/pool/:idOrSlug
+
+Cập nhật logo và mô tả của một airdrop pool. Chỉ người tạo pool mới được cập nhật.
+
+**Headers:**
+```
+Authorization: Bearer <jwt_token>
+Content-Type: multipart/form-data
+```
+
+**Path Parameters:**
+- `idOrSlug`: ID hoặc slug của pool (ví dụ: `1` hoặc `"my-airdrop-pool-1"`)
+
+**Request Body (Form Data - với logo file):**
+```
+logo: [file upload]
+describe: "Mô tả cập nhật về pool"
+```
+
+**Request Body (Form Data - với logo URL):**
+```
+logo: "https://example.com/new-logo.png"
+describe: "Mô tả cập nhật về pool"
+```
+
+**Request Body (Form Data - chỉ cập nhật mô tả):**
+```
+describe: "Mô tả cập nhật về pool"
+```
+
+**Request Body (Form Data - chỉ cập nhật logo):**
+```
+logo: [file upload]
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Pool updated successfully",
+  "data": {
+    "poolId": 1,
+    "name": "My Airdrop Pool",
+    "slug": "my-airdrop-pool-1",
+    "logo": "https://res.cloudinary.com/.../new-logo.jpg",
+    "describe": "Mô tả cập nhật về pool",
+    "status": "active"
+  }
+}
+```
+
+**Validation Rules:**
+- `logo`: Tùy chọn, có thể là URL hoặc file upload
+- `describe`: Tùy chọn
+- Chỉ người tạo pool mới được cập nhật
+
+**Business Logic:**
+1. Kiểm tra pool có tồn tại không (theo ID hoặc slug)
+2. Kiểm tra user có phải là creator của pool không
+3. Nếu có logo file: Upload lên Cloudinary
+4. Nếu có logo URL: Sử dụng URL trực tiếp
+5. Cập nhật chỉ những trường được truyền vào
+6. Trả về thông tin pool đã được cập nhật
 
 ### Stake Pool API
 
