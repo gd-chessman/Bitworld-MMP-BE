@@ -1661,6 +1661,25 @@ export class TelegramWalletsService {
             const BITT_MINT = '4DaQEZKVnRiTZjN5HS9TdsuRiknCWPX6Ux6tDRRLvtAN';
 
             const tokens = await Promise.all(allTokenAccounts.map(async (account) => {
+                // Always override SOL info
+                if (account.mint === SOL_MINT) {
+                    // Lấy giá SOL thực tế nếu có
+                    const tokenPrice = await this.solanaService.getTokenPricesInRealTime([SOL_MINT]);
+                    const priceUSD = tokenPrice?.get(SOL_MINT)?.priceUSD || 0;
+                    const priceSOL = tokenPrice?.get(SOL_MINT)?.priceSOL || 1;
+                    return {
+                        token_address: SOL_MINT,
+                        token_name: 'SOL',
+                        token_symbol: 'SOL',
+                        token_logo_url: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
+                        token_decimals: 9,
+                        token_balance: account.amount,
+                        token_balance_usd: account.amount * priceUSD,
+                        token_price_usd: priceUSD,
+                        token_price_sol: priceSOL,
+                        is_verified: true
+                    };
+                }
                 // Always override USDT info
                 if (account.mint === USDT_MINT) {
                     // Lấy giá USDT thực tế nếu có
@@ -1688,7 +1707,7 @@ export class TelegramWalletsService {
                     const priceSOL = tokenPrice?.get(BITT_MINT)?.priceSOL || 0;
                     return {
                         token_address: BITT_MINT,
-                        token_name: 'Bitcoin AI Trading Token',
+                        token_name: 'BITT',
                         token_symbol: 'BITT',
                         token_logo_url: 'https://ipfs.filebase.io/ipfs/QmYXoGub5bFrqMGDtCM6WuCKch4BUizmENR4R8MQxW2bfq',
                         token_decimals: 9,

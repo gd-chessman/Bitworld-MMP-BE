@@ -2837,24 +2837,23 @@ export class AdminService implements OnModuleInit {
         .where('pool.apl_status = :status', { status: AirdropPoolStatus.ACTIVE })
         .getMany();
 
-      let poolsLeaderboard: Array<{
+      let allStakers: Array<{
         poolId: number;
         poolName: string;
         poolSlug: string;
         poolLogo?: string;
         totalPoolVolume: number;
         memberCount: number;
-        topStaker: {
-          walletId: number;
-          solanaAddress: string;
-          nickName?: string;
-          isBittworld: boolean;
-          bittworldUid?: string | null;
-          stakedVolume: number;
-          percentageOfPool: number;
-          isCreator: boolean;
-          stakingDate: Date;
-        };
+        status: AirdropPoolStatus;
+        walletId: number;
+        solanaAddress: string;
+        nickName?: string;
+        isBittworld: boolean;
+        bittworldUid?: string | null;
+        stakedVolume: number;
+        percentageOfPool: number;
+        isCreator: boolean;
+        stakingDate: Date;
       }> = [];
 
       // Process each pool
@@ -2871,18 +2870,19 @@ export class AdminService implements OnModuleInit {
         const totalStakeVolume = poolStakes.reduce((sum, stake) => sum + Number(stake.apj_volume), 0);
         const totalPoolVolume = Number(pool.apl_volume) + totalStakeVolume;
 
-        // Create entries for this pool
-        const poolEntries: Array<{
-          walletId: number;
-          solanaAddress: string;
-          nickName?: string;
-          isBittworld: boolean;
-          bittworldUid?: string | null;
-          stakedVolume: number;
-          percentageOfPool: number;
-          isCreator: boolean;
-          stakingDate: Date;
-        }> = [];
+        // Calculate actual member count from stake records (including creator) - same logic as getAirdropPools
+        const uniqueMembers = new Set<number>();
+        
+        // Add creator to member count (always included)
+        uniqueMembers.add(pool.alp_originator);
+        
+        // Add all members from stake records (Set automatically handles duplicates)
+        // If creator also exists in stake records, it will be deduplicated automatically
+        for (const stake of poolStakes) {
+          uniqueMembers.add(stake.apj_member);
+        }
+        
+        const actualMemberCount = uniqueMembers.size;
 
         // Group stakes by wallet and calculate total volume per user (including creator)
         const userVolumes = new Map<number, {
@@ -2927,10 +2927,17 @@ export class AdminService implements OnModuleInit {
           }
         }
 
-        // Add all users with total volume per user
+        // Add all users from this pool to the main list
         for (const [walletId, userData] of userVolumes) {
           const wallet = userData.wallet;
-          poolEntries.push({
+          allStakers.push({
+            poolId: pool.alp_id,
+            poolName: pool.alp_name,
+            poolSlug: pool.alp_slug,
+            poolLogo: pool.alp_logo,
+            totalPoolVolume,
+            memberCount: actualMemberCount, // Use calculated member count instead of pool.alp_member_num
+            status: pool.apl_status,
             walletId: walletId,
             solanaAddress: wallet?.wallet_solana_address || '',
             nickName: wallet?.wallet_nick_name,
@@ -2942,47 +2949,27 @@ export class AdminService implements OnModuleInit {
             stakingDate: userData.earliestStakeDate
           });
         }
-
-        // Sort by staked volume and get top staker
-        poolEntries.sort((a, b) => b.stakedVolume - a.stakedVolume);
-        const topStaker = poolEntries[0];
-
-        if (topStaker) {
-          poolsLeaderboard.push({
-            poolId: pool.alp_id,
-            poolName: pool.alp_name,
-            poolSlug: pool.alp_slug,
-            poolLogo: pool.alp_logo,
-            totalPoolVolume,
-            memberCount: pool.alp_member_num,
-            topStaker
-          });
-        }
       }
+
+      // Sort all stakers by staked volume (descending)
+      allStakers.sort((a, b) => b.stakedVolume - a.stakedVolume);
 
       // Filter by minimum volume if specified
       if (minVolume !== undefined && minVolume > 0) {
-        poolsLeaderboard = poolsLeaderboard.filter(pool => 
-          pool.topStaker.stakedVolume >= minVolume
-        );
+        allStakers = allStakers.filter(staker => staker.stakedVolume >= minVolume);
       }
 
       // Filter by maximum volume if specified
       if (maxVolume !== undefined && maxVolume > 0) {
-        poolsLeaderboard = poolsLeaderboard.filter(pool => 
-          pool.topStaker.stakedVolume <= maxVolume
-        );
+        allStakers = allStakers.filter(staker => staker.stakedVolume <= maxVolume);
       }
 
-      // Sort pools by top staker's volume (descending)
-      poolsLeaderboard.sort((a, b) => b.topStaker.stakedVolume - a.topStaker.stakedVolume);
-
       // Calculate pagination
-      const total = poolsLeaderboard.length;
+      const total = allStakers.length;
       const totalPages = Math.ceil(total / limit);
       const startIndex = (page - 1) * limit;
       const endIndex = startIndex + limit;
-      const paginatedData = poolsLeaderboard.slice(startIndex, endIndex);
+      const paginatedData = allStakers.slice(startIndex, endIndex);
 
       // Helper function to determine volume tier
       const getVolumeTier = (volume: number): string => {
@@ -2993,16 +2980,25 @@ export class AdminService implements OnModuleInit {
       };
 
       // Transform to response format
-      const rankedData = paginatedData.map((poolData, index) => ({
+      const rankedData = paginatedData.map((staker, index) => ({
         rank: startIndex + index + 1,
-        poolId: poolData.poolId,
-        poolName: poolData.poolName,
-        poolSlug: poolData.poolSlug,
-        poolLogo: poolData.poolLogo,
-        totalPoolVolume: poolData.totalPoolVolume,
-        memberCount: poolData.memberCount,
-        volumeTier: getVolumeTier(poolData.topStaker.stakedVolume),
-        ...poolData.topStaker
+        poolId: staker.poolId,
+        poolName: staker.poolName,
+        poolSlug: staker.poolSlug,
+        poolLogo: staker.poolLogo,
+        totalPoolVolume: staker.totalPoolVolume,
+        memberCount: staker.memberCount,
+        status: staker.status,
+        volumeTier: getVolumeTier(staker.stakedVolume),
+        walletId: staker.walletId,
+        solanaAddress: staker.solanaAddress,
+        nickName: staker.nickName,
+        isBittworld: staker.isBittworld,
+        bittworldUid: staker.bittworldUid,
+        stakedVolume: staker.stakedVolume,
+        percentageOfPool: staker.percentageOfPool,
+        isCreator: staker.isCreator,
+        stakingDate: staker.stakingDate
       }));
 
       return {
