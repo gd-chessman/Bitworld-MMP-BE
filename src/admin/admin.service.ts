@@ -414,6 +414,7 @@ export class AdminService implements OnModuleInit {
         'wallet.wallet_code_ref',
         'wallet.isBittworld',
         'wallet.bittworld_uid',
+        'wallet.referrer_bittworld_uid',
         'wallet_auths',
         'user_wallet.uw_id',
         'user_wallet.uw_email',
