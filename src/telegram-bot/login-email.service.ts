@@ -492,6 +492,7 @@ export class LoginEmailService {
                 wallet_country: dto.country,
                 wallet_code_ref: referralCode,
                 bittworld_uid: dto.bittworld_uid || undefined,
+                referrer_bittworld_uid: dto.referrer_bittworld_uid || undefined,
                 isBittworld: isBittworld
             });
             await this.listWalletRepository.save(newWallet);

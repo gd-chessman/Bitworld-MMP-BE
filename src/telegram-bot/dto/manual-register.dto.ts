@@ -26,6 +26,11 @@ export class ManualRegisterDto {
     @MaxLength(20)
     refCode?: string;
 
+    @IsOptional()
+    @IsString()
+    @MaxLength(100)
+    referrer_bittworld_uid?: string;
+
     @IsString()
     @MinLength(4)
     @MaxLength(50)

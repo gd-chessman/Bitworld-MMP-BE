@@ -75,6 +75,14 @@ export class ListWallet {
     bittworld_uid: string;
 
     @Column({
+        type: 'varchar',
+        length: 100,
+        nullable: true,
+        comment: 'Referrer Bittworld UID'
+    })
+    referrer_bittworld_uid: string;
+
+    @Column({
         type: 'boolean',
         default: false,
         comment: 'Is Bittworld wallet?'
