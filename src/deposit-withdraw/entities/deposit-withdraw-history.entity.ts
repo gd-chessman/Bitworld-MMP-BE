@@ -47,6 +47,22 @@ export class DepositWithdrawHistory {
   @Column({ nullable: true })
   error_message: string;
 
+  @Column({ 
+    type: 'varchar', 
+    length: 10, 
+    nullable: true, 
+    comment: 'Token symbol (e.g., SOL, USDT, USDC)' 
+  })
+  token_symbol: string | null;
+
+  @Column({ 
+    type: 'varchar', 
+    length: 44, 
+    nullable: true, 
+    comment: 'Token mint address (for SPL tokens)' 
+  })
+  token_mint_address: string | null;
+
   @CreateDateColumn()
   created_at: Date;
 

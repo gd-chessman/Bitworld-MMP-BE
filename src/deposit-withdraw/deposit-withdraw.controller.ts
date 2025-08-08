@@ -2,7 +2,7 @@ import { Controller, Post, Get, Body, UseGuards, Request, Query } from '@nestjs/
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { DepositWithdrawService } from './deposit-withdraw.service';
-import { CreateDepositWithdrawDto, GetHistoryDto, DepositWithdrawResponseDto } from './dto/deposit-withdraw.dto';
+import { CreateDepositWithdrawDto, CreateMultiTokenDepositWithdrawDto, GetHistoryDto, DepositWithdrawResponseDto } from './dto/deposit-withdraw.dto';
 
 @ApiTags('deposit-withdraw')
 @Controller('deposit-withdraw')
@@ -12,13 +12,23 @@ export class DepositWithdrawController {
   constructor(private readonly depositWithdrawService: DepositWithdrawService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Create a new deposit or withdrawal transaction' })
+  @ApiOperation({ summary: 'Create a new deposit or withdrawal transaction (SOL only)' })
   @ApiResponse({ status: 201, description: 'Transaction created successfully', type: DepositWithdrawResponseDto })
   async createDepositWithdraw(
     @Body() dto: CreateDepositWithdrawDto,
     @Request() req,
   ) {
     return this.depositWithdrawService.createDepositWithdraw(dto, req.user.uid, req.user.wallet_id);
+  }
+
+  @Post('multi-token')
+  @ApiOperation({ summary: 'Create a new deposit or withdrawal transaction (supports all tokens: SOL, USDT, USDC, etc.)' })
+  @ApiResponse({ status: 201, description: 'Transaction created successfully', type: DepositWithdrawResponseDto })
+  async createMultiTokenDepositWithdraw(
+    @Body() dto: CreateMultiTokenDepositWithdrawDto,
+    @Request() req,
+  ) {
+    return this.depositWithdrawService.createMultiTokenDepositWithdraw(dto, req.user.uid, req.user.wallet_id);
   }
 
   @Get('history')
