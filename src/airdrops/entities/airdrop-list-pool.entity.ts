@@ -41,6 +41,9 @@ export class AirdropListPool {
     @Column({ name: 'apl_end_date', type: 'timestamp', nullable: true })
     apl_end_date: Date;
 
+    @Column({ name: 'apl_round_end', type: 'timestamp', nullable: true })
+    apl_round_end: Date | null;
+
     @Column({
         name: 'apl_status',
         type: 'enum',

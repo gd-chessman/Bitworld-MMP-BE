@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, Query, UseGuards, Request, Res, HttpCode, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, Query, UseGuards, Request, Res, HttpCode, UseInterceptors, UploadedFile, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { CategoryResponseDto } from './dto/category-response.dto';
@@ -27,13 +27,21 @@ import { AirdropPoolStatsResponseDto } from './dto/airdrop-pool-stats-response.d
 import { AirdropPoolDetailResponseDto } from './dto/airdrop-pool-detail-response.dto';
 import { AirdropStakingLeaderboardResponseDto } from './dto/airdrop-staking-leaderboard.dto';
 import { ConflictException, HttpException, HttpStatus, UnauthorizedException } from '@nestjs/common';
+import { AirdropAdminService } from './airdrop-admin.service';
+import { CreateAirdropTokenDto } from './dto/create-airdrop-token.dto';
+import { UpdateAirdropTokenDto } from './dto/update-airdrop-token.dto';
+import { GetAirdropTokensDto } from './dto/get-airdrop-tokens.dto';
+import { AirdropCalculateDto } from './dto/airdrop-calculate.dto';
+import { GetAirdropRewardsDto } from './dto/get-airdrop-rewards.dto';
+import { AirdropRewardsListResponseDto } from './dto/airdrop-rewards-response.dto';
 
 @ApiTags('admin')
 @Controller('admin')
 export class AdminController {
   constructor(
     private readonly adminService: AdminService,
-    private readonly adminGateway: AdminGateway
+    private readonly adminGateway: AdminGateway,
+    private readonly airdropAdminService: AirdropAdminService
   ) {}
 
   // @Post('register')
@@ -636,7 +644,71 @@ export class AdminController {
     return this.adminService.getAirdropPoolsStakingLeaderboard(page, limit, minVolume, maxVolume);
   }
 
+  @UseGuards(JwtAuthAdminGuard)
+  @Post('airdrop-tokens')
+  @ApiOperation({ summary: 'Create new airdrop token (Highest admin only)' })
+  @ApiResponse({ status: 201, description: 'Airdrop token created successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid input data or airdrop program already exists' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can create airdrop tokens' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Only highest admin role can create airdrop tokens' })
+  async createAirdropToken(@Body() createAirdropTokenDto: CreateAirdropTokenDto, @Request() req) {
+    return await this.airdropAdminService.createAirdropToken(createAirdropTokenDto, req.user);
+  }
 
+  @UseGuards(JwtAuthAdminGuard)
+  @Get('airdrop-tokens')
+  @ApiOperation({ summary: 'Get airdrop tokens list with filtering and pagination' })
+  @ApiResponse({ status: 200, description: 'Airdrop tokens retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can view airdrop tokens' })
+  async getAirdropTokens(@Query() getAirdropTokensDto: GetAirdropTokensDto) {
+    return await this.airdropAdminService.getAirdropTokens(getAirdropTokensDto);
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Post('airdrop-calculate')
+  @ApiOperation({ summary: 'Calculate airdrop rewards for active tokens (Highest admin only)' })
+  @ApiResponse({ status: 200, description: 'Airdrop rewards calculated successfully' })
+  @ApiResponse({ status: 400, description: 'No active airdrop tokens found or invalid input' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can calculate airdrop rewards' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Only highest admin role can calculate airdrop rewards' })
+  async calculateAirdropRewards(@Body() airdropCalculateDto: AirdropCalculateDto, @Request() req) {
+    return await this.airdropAdminService.calculateAirdropRewards(airdropCalculateDto, req.user);
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Put('airdrop-tokens/:id')
+  @ApiOperation({ summary: 'Update airdrop token (Highest admin only)' })
+  @ApiParam({
+    name: 'id',
+    description: 'ID of the airdrop token to update',
+    example: 1
+  })
+  @ApiResponse({ status: 200, description: 'Airdrop token updated successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid input data or cannot update due to token status' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can update airdrop tokens' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Only highest admin role can update airdrop tokens' })
+  @ApiResponse({ status: 404, description: 'Airdrop token not found' })
+  async updateAirdropToken(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() updateAirdropTokenDto: UpdateAirdropTokenDto,
+    @Request() req
+  ) {
+    return await this.airdropAdminService.updateAirdropToken(id, updateAirdropTokenDto, req.user);
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Get('airdrop-rewards')
+  @ApiOperation({ summary: 'Get airdrop rewards with filtering and wallet information' })
+  @ApiResponse({ status: 200, type: AirdropRewardsListResponseDto, description: 'Airdrop rewards retrieved successfully' })
+  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Number of items per page' })
+  @ApiQuery({ name: 'token_mint', required: false, type: String, description: 'Filter by token mint address' })
+  @ApiQuery({ name: 'alt_id', required: false, type: Number, description: 'Filter by token ID' })
+  @ApiQuery({ name: 'status', required: false, enum: ['can_withdraw', 'withdrawn'], description: 'Filter by reward status' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search by wallet address or email' })
+  async getAirdropRewards(@Query() getAirdropRewardsDto: GetAirdropRewardsDto): Promise<AirdropRewardsListResponseDto> {
+    return this.airdropAdminService.getAirdropRewards(getAirdropRewardsDto);
+  }
 
   // ==================== BITTWORLD MANAGEMENT ====================
 

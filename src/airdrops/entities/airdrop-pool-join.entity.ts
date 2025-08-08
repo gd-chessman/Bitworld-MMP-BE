@@ -29,6 +29,9 @@ export class AirdropPoolJoin {
     @Column({ name: 'apj_stake_end', type: 'timestamp', nullable: true })
     apj_stake_end: Date;
 
+    @Column({ name: 'apj_round_end', type: 'timestamp', nullable: true })
+    apj_round_end: Date | null;
+
     @Column({
         name: 'apj_status',
         type: 'enum',

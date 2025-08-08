@@ -43,7 +43,26 @@ export class AirdropsService {
         private readonly cloudinaryService: CloudinaryService
     ) {}
 
+    /**
+     * Check if airdrop calculation is in progress
+     */
+    private async isAirdropCalculationInProgress(): Promise<boolean> {
+        try {
+            const lockKey = 'airdrop_calculation_global_lock';
+            const currentLock = await this.redisLockService['redisService'].get(`lock:${lockKey}`);
+            return !!currentLock;
+        } catch (error) {
+            this.logger.error('Error checking airdrop calculation lock:', error);
+            return false;
+        }
+    }
+
     async createPool(walletId: number, createPoolDto: CreatePoolDto, logoFile?: Express.Multer.File) {
+        // Check if airdrop calculation is in progress
+        if (await this.isAirdropCalculationInProgress()) {
+            throw new BadRequestException('Máy chủ đang quá tải, vui lòng thử lại sau...');
+        }
+
         // Create lock key to prevent duplicate API calls
         const lockKey = `create_pool_${walletId}`;
         
@@ -364,6 +383,11 @@ export class AirdropsService {
     }
 
     async stakePool(walletId: number, stakePoolDto: StakePoolDto) {
+        // Check if airdrop calculation is in progress
+        if (await this.isAirdropCalculationInProgress()) {
+            throw new BadRequestException('Máy chủ đang quá tải, vui lòng thử lại sau...');
+        }
+
         // Create lock key to prevent duplicate API calls
         const lockKey = `stake_pool_${walletId}_${stakePoolDto.poolId}`;
         

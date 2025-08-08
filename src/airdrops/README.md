@@ -23,13 +23,14 @@ Bảng lưu thông tin các airdrop pools
 | apl_volume | DECIMAL(18,6) | NO | 0 | Tổng volume |
 | apl_creation_date | TIMESTAMP | NO | CURRENT_TIMESTAMP | Thời gian tạo |
 | apl_end_date | TIMESTAMP | YES | - | Thời gian kết thúc |
+| apl_round_end | TIMESTAMP | YES | NULL | Thời điểm kết thúc vòng hiện tại (round) |
 | apl_status | ENUM | NO | 'pending' | Trạng thái pool |
 | apl_hash | TEXT | YES | NULL | Transaction hash khi giao dịch thành công |
 
 **Foreign Keys:**
 - `alp_originator` → `list_wallets.wallet_id` (ON DELETE RESTRICT, ON UPDATE CASCADE)
 
-### 2. airdrop_pool_joins
+### 2. airdrop_pool_joins 
 Bảng lưu thông tin thành viên tham gia pool
 
 | Column | Type | Nullable | Default | Description |
@@ -40,6 +41,7 @@ Bảng lưu thông tin thành viên tham gia pool
 | apj_volume | DECIMAL(18,6) | NO | 0 | Volume stake |
 | apj_stake_date | TIMESTAMP | NO | CURRENT_TIMESTAMP | Thời gian stake |
 | apj_stake_end | TIMESTAMP | YES | - | Thời gian kết thúc stake |
+| apj_round_end | TIMESTAMP | YES | NULL | Thời điểm kết thúc vòng stake hiện tại (round) |
 | apj_status | ENUM | NO | 'pending' | Trạng thái join |
 | apj_hash | TEXT | YES | NULL | Transaction hash khi giao dịch thành công |
 

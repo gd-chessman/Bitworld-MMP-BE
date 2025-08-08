@@ -26,9 +26,15 @@ import { SwapSettings } from '../swaps/entities/swap-setting.entity';
 import { SwapInvestorReward } from '../swaps/entities/swap-investor-reward.entity';
 import { AirdropListPool } from '../airdrops/entities/airdrop-list-pool.entity';
 import { AirdropPoolJoin } from '../airdrops/entities/airdrop-pool-join.entity';
+import { AirdropListToken } from '../airdrops/entities/airdrop-list-token.entity';
+import { AirdropReward } from '../airdrops/entities/airdrop-reward.entity';
+import { AirdropPoolRound } from '../airdrops/entities/airdrop-pool-round.entity';
+import { AirdropRoundDetail } from '../airdrops/entities/airdrop-round-detail.entity';
 import { BittworldsModule } from '../bittworlds/bittworlds.module';
 import { BittworldRewards } from '../bittworlds/entities/bittworld-rewards.entity';
 import { BittworldWithdraw } from '../bittworlds/entities/bittworld-withdraws.entity';
+import { AirdropAdminService } from './airdrop-admin.service';
+import { SharedModule } from '../shared/shared.module';
 
 @Module({
   imports: [
@@ -47,6 +53,10 @@ import { BittworldWithdraw } from '../bittworlds/entities/bittworld-withdraws.en
       SwapInvestorReward,
       AirdropListPool,
       AirdropPoolJoin,
+      AirdropListToken,
+      AirdropReward,
+      AirdropPoolRound,
+      AirdropRoundDetail,
       BittworldRewards,
       BittworldWithdraw,
     ]),
@@ -66,9 +76,10 @@ import { BittworldWithdraw } from '../bittworlds/entities/bittworld-withdraws.en
     }),
     ReferralModule,
     BittworldsModule,
+    SharedModule,
   ],
   controllers: [AdminController],
-  providers: [AdminService, AdminGateway, AdminJwtStrategy],
+  providers: [AdminService, AdminGateway, AdminJwtStrategy, AirdropAdminService],
   exports: [AdminService, AdminGateway],
 })
 export class AdminModule implements OnModuleInit {
