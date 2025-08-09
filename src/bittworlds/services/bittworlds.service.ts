@@ -102,8 +102,18 @@ export class BittworldsService {
             }
 
             // Bước 3: Tạo reward record
+            // Tính toán SOL amount từ USD amount
+            let solAmount: number | undefined;
+            try {
+                const solPriceInfo = await this.solanaService.getTokenPriceInRealTime('So11111111111111111111111111111111111111112');
+                solAmount = calculatedAmount / solPriceInfo.priceUSD;
+            } catch (error) {
+                this.logger.warn(`Failed to get SOL price for reward calculation: ${error.message}`);
+                solAmount = undefined;
+            }
+
             const reward = this.bittworldRewardsRepository.create({
-                br_amount_sol: undefined, // Sẽ được cập nhật sau khi có tỷ giá SOL
+                br_amount_sol: solAmount,
                 br_amount_usd: calculatedAmount,
                 br_status: 'can_withdraw' // Giao dịch thành công nên có thể rút tiền ngay
             });
@@ -153,19 +163,19 @@ export class BittworldsService {
 
                 this.logger.log(`Found ${rewardsToWithdraw.length} rewards to withdraw`);
 
-                // Bước 2: Tính tổng SOL cần rút
-                const totalSolAmount = rewardsToWithdraw.reduce((sum, reward) => {
-                    return sum + (reward.br_amount_sol || 0);
+                // Bước 2: Tính tổng USD và SOL cần rút
+                const totalUsdAmount = rewardsToWithdraw.reduce((sum, reward) => {
+                    return sum + (reward.br_amount_usd || 0);
                 }, 0);
 
-                if (totalSolAmount <= 0) {
-                    this.logger.log('Total SOL amount is zero or negative');
+                if (totalUsdAmount <= 0) {
+                    this.logger.log('Total USD amount is zero or negative');
                     return;
                 }
 
-                // Bước 3: Lấy tỷ giá SOL hiện tại
+                // Bước 3: Lấy tỷ giá SOL hiện tại và tính SOL amount
                 const solPriceInfo = await this.solanaService.getTokenPriceInRealTime('So11111111111111111111111111111111111111112');
-                const totalUsdAmount = totalSolAmount * solPriceInfo.priceUSD;
+                const totalSolAmount = totalUsdAmount / solPriceInfo.priceUSD;
 
                 // Bước 4: Cập nhật tất cả rewards thành pending
                 const rewardIds = rewardsToWithdraw.map(reward => reward.br_id);
