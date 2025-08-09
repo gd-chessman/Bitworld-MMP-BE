@@ -1752,10 +1752,23 @@ export class AirdropsService {
                 throw new Error('Pool does not exist');
             }
 
-            // Check if user is the creator of the pool
-            // if (pool.alp_originator !== walletId) {
-            //     throw new BadRequestException('Only the pool creator can access pool detail transactions');
-            // }
+            // Check if user is the creator or a member of the pool
+            const isCreator = pool.alp_originator === walletId;
+            
+            if (!isCreator) {
+                // Check if user is a member of this pool
+                const memberStake = await this.airdropPoolJoinRepository.findOne({
+                    where: {
+                        apj_pool_id: pool.alp_id,
+                        apj_member: walletId,
+                        apj_status: AirdropPoolJoinStatus.ACTIVE
+                    }
+                });
+                
+                if (!memberStake) {
+                    throw new BadRequestException('You can only view pool transactions if you are the creator or a member of this pool');
+                }
+            }
 
             // Call getPoolDetailTransactions method with found poolId
             return await this.getPoolDetailTransactions(pool.alp_id, walletId, query);
@@ -1869,7 +1882,7 @@ export class AirdropsService {
             }
 
             // 11. Get all transactions in the pool
-            const transactions = await this.getPoolTransactions(poolId, query);
+            const transactions = await this.getPoolTransactions(poolId, walletId, query);
             poolDetail.transactions = transactions;
 
             return poolDetail;
@@ -1880,18 +1893,9 @@ export class AirdropsService {
         }
     }
 
-    private async getPoolTransactions(poolId: number, query: GetPoolDetailTransactionsDto): Promise<TransactionInfoDto[]> {
+    private async getPoolTransactions(poolId: number, requestingWalletId: number, query: GetPoolDetailTransactionsDto): Promise<TransactionInfoDto[]> {
         try {
-            // 1. Get all stake records of the pool with member information
-            const allStakes = await this.airdropPoolJoinRepository.find({
-                where: {
-                    apj_pool_id: poolId,
-                    apj_status: AirdropPoolJoinStatus.ACTIVE
-                },
-                relations: ['member']
-            });
-
-            // 2. Get creator information
+            // 1. Get pool information first to check if requesting user is creator
             const pool = await this.airdropListPoolRepository.findOne({
                 where: { alp_id: poolId },
                 relations: ['originator']
@@ -1901,26 +1905,55 @@ export class AirdropsService {
                 throw new Error('Pool does not exist');
             }
 
-            // 3. Create transactions list
-            const transactions: TransactionInfoDto[] = [];
+            const isCreator = pool.alp_originator === requestingWalletId;
 
-            // 4. Add creator's initial transaction (if pool is active)
-            if (pool.apl_status === AirdropPoolStatus.ACTIVE && pool.originator) {
-                transactions.push({
-                    transactionId: 0, // Special ID for creator's initial transaction
-                    memberId: pool.alp_originator,
-                    solanaAddress: pool.originator.wallet_solana_address,
-                    bittworldUid: pool.originator.bittworld_uid || null,
-                    nickname: pool.originator.wallet_nick_name || 'Creator',
-                    isCreator: true,
-                    stakeAmount: Number(pool.apl_volume),
-                    transactionDate: pool.apl_creation_date,
-                    status: pool.apl_status,
-                    transactionHash: pool.apl_hash
+            // 2. Get stake records based on user role
+            let allStakes;
+            if (isCreator) {
+                // Creator can see all stakes
+                allStakes = await this.airdropPoolJoinRepository.find({
+                    where: {
+                        apj_pool_id: poolId,
+                        apj_status: AirdropPoolJoinStatus.ACTIVE
+                    },
+                    relations: ['member']
+                });
+            } else {
+                // Member can only see their own stakes
+                allStakes = await this.airdropPoolJoinRepository.find({
+                    where: {
+                        apj_pool_id: poolId,
+                        apj_member: requestingWalletId,
+                        apj_status: AirdropPoolJoinStatus.ACTIVE
+                    },
+                    relations: ['member']
                 });
             }
 
-            // 5. Add all member transactions
+            // 3. Create transactions list
+            const transactions: TransactionInfoDto[] = [];
+
+            // 4. Add creator's initial transaction (if pool is active and user can see it)
+            if (pool.apl_status === AirdropPoolStatus.ACTIVE && pool.originator) {
+                // Creator can always see their own initial transaction
+                // Members can only see creator's transaction if they are the creator or if creator allows it
+                if (isCreator) {
+                    transactions.push({
+                        transactionId: 0, // Special ID for creator's initial transaction
+                        memberId: pool.alp_originator,
+                        solanaAddress: pool.originator.wallet_solana_address,
+                        bittworldUid: pool.originator.bittworld_uid || null,
+                        nickname: pool.originator.wallet_nick_name || 'Creator',
+                        isCreator: true,
+                        stakeAmount: Number(pool.apl_volume),
+                        transactionDate: pool.apl_creation_date,
+                        status: pool.apl_status,
+                        transactionHash: pool.apl_hash
+                    });
+                }
+            }
+
+            // 5. Add member transactions (filtered based on user role)
             for (const stake of allStakes) {
                 if (stake.member) {
                     transactions.push({
