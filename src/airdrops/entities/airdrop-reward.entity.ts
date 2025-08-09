@@ -48,6 +48,9 @@ export class AirdropReward {
   })
   ar_type: AirdropRewardType;
 
+  @Column({ name: 'ar_date', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+  ar_date: Date;
+
   @ManyToOne(() => AirdropListToken)
   @JoinColumn({ name: 'ar_token_airdrop_id', referencedColumnName: 'alt_id' })
   tokenAirdrop: AirdropListToken;
