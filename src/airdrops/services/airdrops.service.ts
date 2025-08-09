@@ -1753,9 +1753,9 @@ export class AirdropsService {
             }
 
             // Check if user is the creator of the pool
-            if (pool.alp_originator !== walletId) {
-                throw new BadRequestException('Only the pool creator can access pool detail transactions');
-            }
+            // if (pool.alp_originator !== walletId) {
+            //     throw new BadRequestException('Only the pool creator can access pool detail transactions');
+            // }
 
             // Call getPoolDetailTransactions method with found poolId
             return await this.getPoolDetailTransactions(pool.alp_id, walletId, query);
