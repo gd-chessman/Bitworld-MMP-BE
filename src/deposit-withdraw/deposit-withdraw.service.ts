@@ -277,6 +277,9 @@ export class DepositWithdrawService {
       return transaction;
     } catch (error) {
       this.logger.error(`Error creating multi-token deposit/withdraw: ${error.message}`);
+      if (error.message.includes('Invalid Solana wallet address')) {
+        throw new BadRequestException('Invalid Solana wallet address');
+      }
       throw new BadRequestException('Error creating multi-token deposit/withdraw');
     }
   }
