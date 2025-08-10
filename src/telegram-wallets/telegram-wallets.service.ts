@@ -53,6 +53,7 @@ import { TelegramBotService } from '../telegram-bot/telegram-bot.service';
 import { VerifyGmailDto, VerifyGmailResponseDto } from './dto/verify-gmail.dto';
 import { MemepumpTokenService } from './memepump-token.service';
 import { BgRefService } from '../referral/bg-ref.service';
+import { SolanaTrackerService } from '../on-chain/solana-tracker.service';
 
 @Injectable()
 export class TelegramWalletsService {
@@ -82,6 +83,7 @@ export class TelegramWalletsService {
         private readonly memepumpTokenService: MemepumpTokenService,
         private readonly notificationService: NotificationService,
         private readonly bgRefService: BgRefService,
+        private readonly solanaTrackerService: SolanaTrackerService,
     ) { }
 
     async verifyWallet(telegramId: string, code: string) {
@@ -1660,6 +1662,28 @@ export class TelegramWalletsService {
             const SOL_MINT = 'So11111111111111111111111111111111111111112';
             const BITT_MINT = '4DaQEZKVnRiTZjN5HS9TdsuRiknCWPX6Ux6tDRRLvtAN';
 
+            // Get detailed token info from Solana Tracker for other tokens (not SOL, USDT, BITT)
+            const otherTokenMints = allTokenAccounts
+                .filter(account => 
+                    account.mint !== SOL_MINT && 
+                    account.mint !== USDT_MINT && 
+                    account.mint !== BITT_MINT
+                )
+                .map(account => account.mint);
+
+            let trackerTokensData: any[] = [];
+            if (otherTokenMints.length > 0) {
+                try {
+                    const trackerResponse = await this.solanaTrackerService.getMultiTokensData(otherTokenMints);
+                    if (trackerResponse.success && trackerResponse.data) {
+                        trackerTokensData = trackerResponse.data;
+                        this.logger.log(`Successfully fetched data for ${trackerTokensData.length} tokens from Solana Tracker`);
+                    }
+                } catch (error) {
+                    this.logger.error(`Error fetching from Solana Tracker: ${error.message}`);
+                }
+            }
+
             const tokens = await Promise.all(allTokenAccounts.map(async (account) => {
                 // Always override SOL info
                 if (account.mint === SOL_MINT) {
@@ -1718,23 +1742,42 @@ export class TelegramWalletsService {
                         is_verified: true
                     };
                 }
-                // Try to get token info from Redis cache first
+                // For other tokens, try to get info from Solana Tracker first
+                const trackerToken = trackerTokensData.find((t: any) => t.address === account.mint);
+                
+                if (trackerToken && (trackerToken.name || trackerToken.symbol)) {
+                    // Use data from Solana Tracker
+                    const tokenPrice = await this.solanaService.getTokenPricesInRealTime([account.mint]);
+                    const tokenBalanceUSD = account.amount * (tokenPrice?.get(account.mint)?.priceUSD || 0);
+                    
+                    return {
+                        token_address: account.mint,
+                        token_name: trackerToken.name || `Token_${account.mint.slice(0, 8)}`,
+                        token_symbol: trackerToken.symbol || account.mint.slice(0, 4).toUpperCase(),
+                        token_logo_url: trackerToken.logo_uri || '',
+                        token_decimals: 9, // Default for most Solana tokens
+                        token_balance: account.amount,
+                        token_balance_usd: tokenBalanceUSD,
+                        token_price_usd: tokenPrice?.get(account.mint)?.priceUSD || 0,
+                        token_price_sol: tokenPrice?.get(account.mint)?.priceSOL || 0,
+                        is_verified: false
+                    };
+                }
+
+                // Fallback to existing logic if tracker data not available
                 const cacheKey = `token:${account.mint}`;
                 let tokenInfo = await this.redisCacheService.get(cacheKey);
 
                 if (!tokenInfo) {
-                    // If not in cache, get from database
                     tokenInfo = await this.solanaListTokenRepository.findOne({
                         where: { slt_address: account.mint }
                     });
 
                     if (tokenInfo) {
-                        // Cache the token info for 1 hour
                         await this.redisCacheService.set(cacheKey, tokenInfo, 3600);
                     }
                 }
 
-                // If still no token info, try to get from Solana network
                 if (!tokenInfo) {
                     try {
                         const tokenData = await this.solanaService.getTokenInfo(account.mint);
@@ -1747,22 +1790,20 @@ export class TelegramWalletsService {
                             slt_is_verified: tokenData.verified || false
                         });
                         await this.solanaListTokenRepository.save(tokenInfo as DeepPartial<SolanaListToken>);
-                        // Cache the new token info
                         await this.redisCacheService.set(cacheKey, tokenInfo, 3600);
                     } catch (error) {
                         this.logger.error(`Error fetching token info for ${account.mint}: ${error.message}`);
                     }
                 }
 
-                // Get token price
                 const tokenPrice = await this.solanaService.getTokenPricesInRealTime([account.mint]);
                 const tokenBalanceUSD = account.amount * (tokenPrice?.get(account.mint)?.priceUSD || 0);
 
                 const info = tokenInfo as Partial<SolanaListToken>;
                 return {
                     token_address: account.mint,
-                    token_name: info?.slt_name || '',
-                    token_symbol: info?.slt_symbol || '',
+                    token_name: info?.slt_name || `Token_${account.mint.slice(0, 8)}`,
+                    token_symbol: info?.slt_symbol || account.mint.slice(0, 4).toUpperCase(),
                     token_logo_url: info?.slt_logo_url || '',
                     token_decimals: info?.slt_decimals || 0,
                     token_balance: account.amount,
