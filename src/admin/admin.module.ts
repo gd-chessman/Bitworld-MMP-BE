@@ -35,6 +35,7 @@ import { BittworldRewards } from '../bittworlds/entities/bittworld-rewards.entit
 import { BittworldWithdraw } from '../bittworlds/entities/bittworld-withdraws.entity';
 import { AirdropAdminService } from './airdrop-admin.service';
 import { SharedModule } from '../shared/shared.module';
+import { OnChainModule } from '../on-chain/on-chain.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { SharedModule } from '../shared/shared.module';
     ReferralModule,
     BittworldsModule,
     SharedModule,
+    OnChainModule,
   ],
   controllers: [AdminController],
   providers: [AdminService, AdminGateway, AdminJwtStrategy, AirdropAdminService],

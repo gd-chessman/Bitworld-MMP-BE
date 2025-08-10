@@ -33,6 +33,7 @@ import { AirdropStakingLeaderboardResponseDto } from './dto/airdrop-staking-lead
 import { BittworldsService } from '../bittworlds/services/bittworlds.service';
 import { BittworldRewards } from '../bittworlds/entities/bittworld-rewards.entity';
 import { BittworldWithdraw } from '../bittworlds/entities/bittworld-withdraws.entity';
+import { SolanaTrackerService } from '../on-chain/solana-tracker.service';
 
 @Injectable()
 export class AdminService implements OnModuleInit {
@@ -71,6 +72,7 @@ export class AdminService implements OnModuleInit {
     private bittworldRewardsRepository: Repository<BittworldRewards>,
     @InjectRepository(BittworldWithdraw)
     private bittworldWithdrawRepository: Repository<BittworldWithdraw>,
+    private readonly solanaTrackerService: SolanaTrackerService,
   ) {
     // Initialize swap settings on app start
     this.initializeSwapSettings();
@@ -711,25 +713,61 @@ export class AdminService implements OnModuleInit {
       .take(limitNum);
 
     const [orders, total] = await qb.getManyAndCount();
-    const data = orders.map(order => ({
-      order_id: order.order_id,
-      walletId: order.order_wallet_id,
-      solAddress: order.wallet?.wallet_solana_address || null,
-      isBittworld: order.wallet?.isBittworld || false,
-      bittworldUid: order.wallet?.isBittworld ? order.wallet?.bittworld_uid || null : null,
-      order_trade_type: order.order_trade_type,
-      order_token_address: order.order_token_address,
-      order_token_name: order.order_token_name,
-      order_qlty: order.order_qlty,
-      order_price: order.order_price,
-      order_total_value: order.order_total_value,
-      order_type: order.order_type,
-      order_status: order.order_status,
-      order_tx_hash: order.order_tx_hash,
-      order_error_message: order.order_error_message,
-      order_created_at: order.order_created_at,
-      order_executed_at: order.order_executed_at
-    }));
+    
+    // Get unique token addresses from orders
+    const uniqueTokenAddresses = [...new Set(orders
+      .map(order => order.order_token_address)
+      .filter(address => address))];
+
+    // Get token info from Solana Tracker
+    let trackerTokensData: any[] = [];
+    if (uniqueTokenAddresses.length > 0) {
+      try {
+        const trackerResponse = await this.solanaTrackerService.getMultiTokensData(uniqueTokenAddresses);
+        if (trackerResponse.success && trackerResponse.data) {
+          trackerTokensData = trackerResponse.data;
+        }
+      } catch (error) {
+        console.error('Error fetching from Solana Tracker:', error.message);
+      }
+    }
+
+    const data = orders.map(order => {
+      // Try to get token info from Solana Tracker
+      const trackerToken = trackerTokensData.find((t: any) => t.address === order.order_token_address);
+      
+      // Determine token name - prioritize Solana Tracker data
+      let tokenName = order.order_token_name;
+      if (!tokenName || tokenName === 'Unknown Token' || tokenName === 'UNKNOWN') {
+        if (trackerToken && (trackerToken.name || trackerToken.symbol)) {
+          tokenName = trackerToken.name || trackerToken.symbol;
+        } else if (order.order_token_address) {
+          // Generate fallback name from address
+          tokenName = `Token_${order.order_token_address.slice(0, 8)}`;
+        }
+      }
+
+      return {
+        order_id: order.order_id,
+        walletId: order.order_wallet_id,
+        solAddress: order.wallet?.wallet_solana_address || null,
+        isBittworld: order.wallet?.isBittworld || false,
+        bittworldUid: order.wallet?.isBittworld ? order.wallet?.bittworld_uid || null : null,
+        order_trade_type: order.order_trade_type,
+        order_token_address: order.order_token_address,
+        order_token_name: tokenName,
+        order_qlty: order.order_qlty,
+        order_price: order.order_price,
+        order_total_value: order.order_total_value,
+        order_type: order.order_type,
+        order_status: order.order_status,
+        order_tx_hash: order.order_tx_hash,
+        order_error_message: order.order_error_message,
+        order_created_at: order.order_created_at,
+        order_executed_at: order.order_executed_at
+      };
+    });
+    
     return {
       data,
       total,
