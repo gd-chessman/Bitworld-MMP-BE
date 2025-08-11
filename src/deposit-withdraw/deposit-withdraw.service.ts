@@ -108,13 +108,12 @@ export class DepositWithdrawService {
         token_mint_address: dto.token_mint_address || null,
         status: TransactionStatus.PENDING,
       });
-      this.logger.log('Transaction: ' + JSON.stringify(transaction));
+
 
       await this.depositWithdrawRepository.save(transaction);
 
       if (dto.type === TransactionType.WITHDRAW) {
         // Handle withdrawal using user's wallet
-        this.logger.log('Transaction withdrawal')
         await this.processWithdrawal(transaction, userKeypair);
       }
 
@@ -146,7 +145,6 @@ export class DepositWithdrawService {
           throw new BadRequestException('Insufficient wallet balance for transaction fee');
         }
         transaction.amount = adjustedAmount;
-        this.logger.log(`Adjusted withdrawal amount to ${adjustedAmount} SOL to account for transaction fee`);
       }
 
       // Create transfer instruction with adjusted amount
@@ -167,14 +165,14 @@ export class DepositWithdrawService {
       // Update transaction status
       transaction.status = TransactionStatus.COMPLETED;
       transaction.transaction_hash = signature;
-      this.logger.log('Transaction COMPLETED: ' + JSON.stringify(transaction));
+
       await this.depositWithdrawRepository.save(transaction);
 
     } catch (error) {
       this.logger.error(`Error processing withdrawal: ${error.message}`);
       transaction.status = TransactionStatus.FAILED;
       transaction.error_message = error.message;
-      this.logger.log('Transaction FAILED: ' + JSON.stringify(transaction));
+
       await this.depositWithdrawRepository.save(transaction);
       throw error;
     }
@@ -301,6 +299,9 @@ export class DepositWithdrawService {
       if (error.message.includes('Source token account not found')) {
         throw new BadRequestException('Source token account not found');
       }
+      if (error.message.includes('Insufficient SOL for ATA creation')) {
+        throw new BadRequestException('Insufficient SOL for ATA creation');
+      }
       if (error.message.includes('Google Auth token is required for withdrawal')) {
         throw new BadRequestException('Google Auth token is required for withdrawal');
       }
@@ -352,7 +353,6 @@ export class DepositWithdrawService {
           throw new BadRequestException('Insufficient SOL balance for transaction fee');
         }
         transaction.amount = adjustedAmount;
-        this.logger.log(`Adjusted withdrawal amount to ${adjustedAmount} SOL to account for transaction fee`);
       }
 
       const transferInstruction = SystemProgram.transfer({
@@ -384,33 +384,118 @@ export class DepositWithdrawService {
       const tokenMint = new PublicKey(transaction.token_mint_address);
       
       // Get source ATA
-      const sourceAta = await getAssociatedTokenAddress(tokenMint, userKeypair.publicKey);
+      let sourceAta = await getAssociatedTokenAddress(tokenMint, userKeypair.publicKey);
       
       // Get destination ATA
-      const destinationAta = await getAssociatedTokenAddress(tokenMint, new PublicKey(transaction.wallet_address_to));
+      let destinationAta = await getAssociatedTokenAddress(tokenMint, new PublicKey(transaction.wallet_address_to));
 
       // Check if source ATA exists
-      const sourceAtaInfo = await this.connection.getAccountInfo(sourceAta);
+      let sourceAtaInfo = await this.connection.getAccountInfo(sourceAta);
       if (!sourceAtaInfo) {
-        throw new BadRequestException('Source token account not found');
+        // Try Token-2022 approach like in airdrops.service.ts
+        this.logger.log('Source ATA not found, trying Token-2022 approach');
+        
+        const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+        
+        // Try to get ATA with Token-2022 program
+        try {
+          const sourceAta2022 = await getAssociatedTokenAddress(
+            tokenMint, 
+            userKeypair.publicKey, 
+            false, 
+            new PublicKey(TOKEN_2022_PROGRAM_ID)
+          );
+          
+          sourceAtaInfo = await this.connection.getAccountInfo(sourceAta2022);
+          if (sourceAtaInfo) {
+            // Update sourceAta to use Token-2022 version
+            sourceAta = sourceAta2022;
+            
+            // Also update destinationAta to use Token-2022 program
+            destinationAta = await getAssociatedTokenAddress(
+              tokenMint,
+              new PublicKey(transaction.wallet_address_to),
+              false,
+              new PublicKey(TOKEN_2022_PROGRAM_ID)
+            );
+            
+            this.logger.log(`Found Token-2022 source ATA: ${sourceAta.toString()}`);
+            this.logger.log(`Updated destination ATA to Token-2022: ${destinationAta.toString()}`);
+          } else {
+            throw new BadRequestException('Source token account not found');
+          }
+        } catch (token2022Error) {
+          this.logger.warn(`Token-2022 approach failed: ${token2022Error.message}`);
+          throw new BadRequestException('Source token account not found');
+        }
       }
 
       // Get token account info to check balance
-      const tokenAccount = await getAccount(this.connection, sourceAta);
-      const tokenBalance = Number(tokenAccount.amount);
+      let tokenAccount;
+      let tokenBalance;
+      let amountInSmallestUnit;
       
-      // Get token mint info to get decimals
-      const mintInfo = await this.connection.getParsedAccountInfo(tokenMint);
-      if (!mintInfo.value) {
-        throw new BadRequestException('Token mint not found');
+      try {
+        tokenAccount = await getAccount(this.connection, sourceAta);
+        tokenBalance = Number(tokenAccount.amount);
+      } catch (balanceError) {
+        this.logger.error(`Error getting token balance: ${balanceError.message}`);
+        // Try alternative approach for Token-2022
+        if (sourceAta.toString() !== (await getAssociatedTokenAddress(tokenMint, userKeypair.publicKey)).toString()) {
+  
+          try {
+            // Use getParsedAccountInfo for Token-2022
+            const parsedAccountInfo = await this.connection.getParsedAccountInfo(sourceAta);
+            if (parsedAccountInfo.value) {
+              const accountData = parsedAccountInfo.value.data as any;
+              if (accountData.parsed && accountData.parsed.info) {
+               tokenBalance = Number(accountData.parsed.info.tokenAmount.amount);
+             } else {
+                throw new Error('Could not parse Token-2022 account data');
+              }
+            } else {
+              throw new Error('Token-2022 account not found');
+            }
+          } catch (altError) {
+            this.logger.error(`Alternative balance check failed: ${altError.message}`);
+            throw new BadRequestException(`Failed to get token balance: ${altError.message}`);
+          }
+        } else {
+          throw new BadRequestException(`Failed to get token balance: ${balanceError.message}`);
+        }
       }
       
-      const mintData = mintInfo.value.data as any;
-      const tokenDecimals = mintData.parsed.info.decimals || 6; // Default to 6 decimals
-      const amountInSmallestUnit = Math.floor(transaction.amount * Math.pow(10, tokenDecimals));
-      
-      if (tokenBalance < amountInSmallestUnit) {
-        throw new BadRequestException('Insufficient token balance');
+      // Get token mint info to get decimals
+      try {
+        const mintInfo = await this.connection.getParsedAccountInfo(tokenMint);
+        if (!mintInfo.value) {
+          throw new BadRequestException('Token mint not found');
+        }
+        
+        const mintData = mintInfo.value.data as any;
+        const tokenDecimals = mintData.parsed.info.decimals || 6; // Default to 6 decimals
+        amountInSmallestUnit = Math.floor(transaction.amount * Math.pow(10, tokenDecimals));
+        
+        if (tokenBalance < amountInSmallestUnit) {
+          throw new BadRequestException('Insufficient token balance');
+        }
+        
+
+      } catch (mintError) {
+        this.logger.error(`Error getting mint info: ${mintError.message}`);
+        // For Token-2022, use default decimals
+        if (sourceAta.toString() !== (await getAssociatedTokenAddress(tokenMint, userKeypair.publicKey)).toString()) {
+
+          amountInSmallestUnit = Math.floor(transaction.amount * Math.pow(10, 9)); // Default to 9 decimals
+          
+          if (tokenBalance < amountInSmallestUnit) {
+            throw new BadRequestException('Insufficient token balance');
+          }
+          
+
+        } else {
+          throw new BadRequestException(`Failed to get mint info: ${mintError.message}`);
+        }
       }
 
       // Create transaction
@@ -419,25 +504,74 @@ export class DepositWithdrawService {
       // Check if destination ATA exists, if not create it
       const destinationAtaInfo = await this.connection.getAccountInfo(destinationAta);
       if (!destinationAtaInfo) {
-        tx.add(
-          createAssociatedTokenAccountInstruction(
-            userKeypair.publicKey, // payer
-            destinationAta, // associated token account
-            new PublicKey(transaction.wallet_address_to), // owner
-            tokenMint // mint
-          )
-        );
+        // Check if we're dealing with Token-2022 by comparing with original SPL ATA
+        const originalSplAta = await getAssociatedTokenAddress(tokenMint, userKeypair.publicKey);
+        const isToken2022 = sourceAta.toString() !== originalSplAta.toString();
+        
+        // Check if user has enough SOL for ATA creation fee
+        const solBalance = await this.connection.getBalance(userKeypair.publicKey);
+        const solBalanceInSol = solBalance / LAMPORTS_PER_SOL;
+        const ataCreationFee = 0.002; // Approximate fee for ATA creation
+        
+        if (solBalanceInSol < ataCreationFee) {
+          throw new BadRequestException(`Insufficient SOL for ATA creation. Need at least ${ataCreationFee} SOL, but only have ${solBalanceInSol} SOL. The destination wallet needs an Associated Token Account to receive tokens.`);
+        }
+        
+        if (isToken2022) {
+          // Use Token-2022 program for destination ATA creation
+          const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+          tx.add(
+            createAssociatedTokenAccountInstruction(
+              userKeypair.publicKey, // payer
+              destinationAta, // associated token account
+              new PublicKey(transaction.wallet_address_to), // owner
+              tokenMint, // mint
+              new PublicKey(TOKEN_2022_PROGRAM_ID) // Token-2022 program ID
+            )
+          );
+        } else {
+          // Use standard SPL Token program
+          tx.add(
+            createAssociatedTokenAccountInstruction(
+              userKeypair.publicKey, // payer
+              destinationAta, // associated token account
+              new PublicKey(transaction.wallet_address_to), // owner
+              tokenMint // mint
+            )
+          );
+        }
       }
 
       // Add transfer instruction
-      tx.add(
-        createTransferInstruction(
-          sourceAta,
-          destinationAta,
-          userKeypair.publicKey,
-          amountInSmallestUnit
-        )
-      );
+      // Check if we're dealing with Token-2022 by comparing with original SPL ATA
+      const originalSplAta = await getAssociatedTokenAddress(tokenMint, userKeypair.publicKey);
+      const isToken2022 = sourceAta.toString() !== originalSplAta.toString();
+      
+      if (isToken2022) {
+        // Use Token-2022 program for transfer
+        const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+
+        tx.add(
+          createTransferInstruction(
+            sourceAta,
+            destinationAta,
+            userKeypair.publicKey,
+            amountInSmallestUnit,
+            [],
+            new PublicKey(TOKEN_2022_PROGRAM_ID) // Token-2022 program ID
+          )
+        );
+      } else {
+        // Use standard SPL Token program
+        tx.add(
+          createTransferInstruction(
+            sourceAta,
+            destinationAta,
+            userKeypair.publicKey,
+            amountInSmallestUnit
+          )
+        );
+      }
 
       // Send transaction
       const signature = await sendAndConfirmTransaction(this.connection, tx, [userKeypair]);
