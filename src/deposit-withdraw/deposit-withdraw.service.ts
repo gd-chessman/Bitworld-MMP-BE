@@ -184,6 +184,9 @@ export class DepositWithdrawService {
     const query = this.depositWithdrawRepository
       .createQueryBuilder('transaction');
 
+    // Loại bỏ các giao dịch có trạng thái FAILED
+    query.andWhere('transaction.status != :failedStatus', { failedStatus: TransactionStatus.FAILED });
+
     if (dto.wallet_address_from) {
       query.andWhere('(transaction.wallet_address_from = :walletAddressFrom OR transaction.wallet_address_to = :walletAddressFrom)', 
         { walletAddressFrom: dto.wallet_address_from });
