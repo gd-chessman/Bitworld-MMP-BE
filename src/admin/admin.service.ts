@@ -17,6 +17,7 @@ import { TradingOrder } from '../trade/entities/trading-order.entity';
 import { WalletReferent } from '../referral/entities/wallet-referent.entity';
 import { ReferentLevelReward } from '../referral/entities/referent-level-rewards.entity';
 import { BgRefService } from '../referral/bg-ref.service';
+import { BgAffiliateNode } from '../referral/entities/bg-affiliate-node.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { SwapInvestors } from '../swaps/entities/swap-investor.entity';
 import { CreateInvestorDto } from './dto/create-investor.dto';
@@ -3381,5 +3382,227 @@ export class AdminService implements OnModuleInit {
     } catch (error) {
       throw new Error(`Failed to get Bittworld withdrawal history: ${error.message}`);
     }
+  }
+
+  /**
+   * Thay đổi luồng BG - Thay đổi người giới thiệu tuyến trên
+   * Cho phép admin thay đổi cấu trúc cây affiliate
+   */
+  async changeBgAffiliateFlow(data: {
+    walletId: number;
+    newParentWalletId: number;
+  }, currentUser?: UserAdmin): Promise<{ 
+    success: boolean;
+    message: string;
+    walletId: number;
+    oldParentWalletId: number | null;
+    newParentWalletId: number;
+    treeChanges: {
+      oldTreeId: number;
+      newTreeId: number;
+      affectedNodes: number;
+    };
+    nodeInfo: any;
+  }> {
+    // Kiểm tra wallet cần thay đổi có tồn tại không
+    const targetWallet = await this.listWalletRepository.findOne({
+      where: { wallet_id: data.walletId }
+    });
+
+    if (!targetWallet) {
+      throw new NotFoundException(`Wallet with ID ${data.walletId} does not exist`);
+    }
+
+    // Kiểm tra wallet cha mới có tồn tại không
+    const newParentWallet = await this.listWalletRepository.findOne({
+      where: { wallet_id: data.newParentWalletId }
+    });
+
+    if (!newParentWallet) {
+      throw new NotFoundException(`New parent wallet with ID ${data.newParentWalletId} does not exist`);
+    }
+
+    // Check PARTNER role - only allow changing flow for wallets with isBittworld = true
+    if (currentUser && currentUser.role === AdminRole.PARTNER) {
+      if (!targetWallet.isBittworld || !newParentWallet.isBittworld) {
+        throw new BadRequestException('PARTNER role can only change flow for wallets with isBittworld = true');
+      }
+    }
+
+    // Kiểm tra wallet cần thay đổi có trong BG affiliate system không
+    const targetBgInfo = await this.bgRefService.getWalletBgAffiliateInfo(data.walletId);
+    if (!targetBgInfo) {
+      throw new BadRequestException('Target wallet does not belong to BG affiliate system');
+    }
+
+    // Kiểm tra wallet cha mới có trong BG affiliate system không
+    const newParentBgInfo = await this.bgRefService.getWalletBgAffiliateInfo(data.newParentWalletId);
+    if (!newParentBgInfo) {
+      throw new BadRequestException('New parent wallet does not belong to BG affiliate system');
+    }
+
+    // Không cho phép thay đổi thành chính mình
+    if (data.walletId === data.newParentWalletId) {
+      throw new BadRequestException('Cannot set wallet as its own parent');
+    }
+
+    // Không cho phép tạo vòng lặp (circular reference)
+    if (await this.wouldCreateCircularReference(data.walletId, data.newParentWalletId)) {
+      throw new BadRequestException('This change would create a circular reference in the affiliate tree');
+    }
+
+    // Không cho phép thay đổi root BG
+    if (targetBgInfo.parentWalletId === null) {
+      throw new BadRequestException('Cannot change flow of root BG wallet');
+    }
+
+    // Không cho phép đặt root BG làm con của node khác
+    // if (newParentBgInfo.parentWalletId === null && targetBgInfo.treeId !== newParentBgInfo.treeId) {
+    //   throw new BadRequestException('Cannot move wallet to different tree under root BG');
+    // }
+
+    // Lấy thông tin node hiện tại
+    const currentNode = await this.bgRefService['bgAffiliateNodeRepository'].findOne({
+      where: { ban_wallet_id: data.walletId }
+    });
+
+    if (!currentNode) {
+      throw new NotFoundException('BG affiliate node not found');
+    }
+
+    const oldParentWalletId = currentNode.ban_parent_wallet_id;
+    const oldTreeId = targetBgInfo.treeId;
+
+    // Kiểm tra xem wallet cha mới có phải là con của wallet cần thay đổi không
+    if (await this.isDescendant(data.newParentWalletId, data.walletId)) {
+      throw new BadRequestException('Cannot set descendant wallet as parent');
+    }
+
+    // Bắt đầu transaction để đảm bảo tính nhất quán
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // 1. Cập nhật parent của node hiện tại
+      currentNode.ban_parent_wallet_id = data.newParentWalletId;
+      currentNode.ban_tree_id = newParentBgInfo.treeId;
+      
+      await queryRunner.manager.save(currentNode);
+
+      // 2. Cập nhật tất cả các node con (descendants) của wallet này
+      const affectedNodes = await this.updateDescendantsTree(
+        data.walletId, 
+        newParentBgInfo.treeId, 
+        queryRunner
+      );
+
+      // 3. Cập nhật commission percent nếu cần
+      if (targetBgInfo.commissionPercent !== newParentBgInfo.commissionPercent) {
+        // Cập nhật commission percent theo parent mới
+        currentNode.ban_commission_percent = newParentBgInfo.commissionPercent;
+        await queryRunner.manager.save(currentNode);
+      }
+
+      // Commit transaction
+      await queryRunner.commitTransaction();
+
+      // Lấy thông tin cập nhật
+      const updatedNodeInfo = await this.bgRefService.getWalletBgAffiliateInfo(data.walletId);
+
+      return {
+        success: true,
+        message: `BG affiliate flow changed successfully. Wallet ${data.walletId} moved from tree ${oldTreeId} to tree ${newParentBgInfo.treeId}`,
+        walletId: data.walletId,
+        oldParentWalletId,
+        newParentWalletId: data.newParentWalletId,
+        treeChanges: {
+          oldTreeId,
+          newTreeId: newParentBgInfo.treeId,
+          affectedNodes: affectedNodes.length
+        },
+        nodeInfo: {
+          walletId: targetWallet.wallet_id,
+          nickName: targetWallet.wallet_nick_name,
+          solanaAddress: targetWallet.wallet_solana_address,
+          oldParentWalletId,
+          newParentWalletId: data.newParentWalletId,
+          oldTreeId,
+          newTreeId: newParentBgInfo.treeId,
+          newCommissionPercent: currentNode.ban_commission_percent,
+          affectedDescendants: affectedNodes.length,
+          reason: 'Admin request'
+        }
+      };
+
+    } catch (error) {
+      // Rollback nếu có lỗi
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      // Giải phóng query runner
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * Kiểm tra xem việc thay đổi có tạo ra vòng lặp không
+   */
+  private async wouldCreateCircularReference(walletId: number, newParentId: number): Promise<boolean> {
+    // Kiểm tra xem newParentId có phải là con của walletId không
+    return await this.isDescendant(newParentId, walletId);
+  }
+
+  /**
+   * Kiểm tra xem một wallet có phải là con (descendant) của wallet khác không
+   */
+  private async isDescendant(potentialDescendantId: number, ancestorId: number): Promise<boolean> {
+    if (potentialDescendantId === ancestorId) {
+      return true;
+    }
+
+    const potentialDescendant = await this.bgRefService['bgAffiliateNodeRepository'].findOne({
+      where: { ban_wallet_id: potentialDescendantId }
+    });
+
+    if (!potentialDescendant || !potentialDescendant.ban_parent_wallet_id) {
+      return false;
+    }
+
+    return await this.isDescendant(potentialDescendant.ban_parent_wallet_id, ancestorId);
+  }
+
+  /**
+   * Cập nhật tất cả các node con (descendants) khi thay đổi parent
+   */
+  private async updateDescendantsTree(
+    walletId: number, 
+    newTreeId: number, 
+    queryRunner: any
+  ): Promise<BgAffiliateNode[]> {
+    const descendants = await this.bgRefService['bgAffiliateNodeRepository'].find({
+      where: { ban_parent_wallet_id: walletId }
+    });
+
+    const updatedNodes: BgAffiliateNode[] = [];
+
+    for (const descendant of descendants) {
+      // Cập nhật tree_id
+      descendant.ban_tree_id = newTreeId;
+      
+      await queryRunner.manager.save(descendant);
+      updatedNodes.push(descendant);
+
+      // Đệ quy cập nhật các node con của node này
+      const childUpdatedNodes = await this.updateDescendantsTree(
+        descendant.ban_wallet_id, 
+        newTreeId, 
+        queryRunner
+      );
+      
+      updatedNodes.push(...childUpdatedNodes);
+    }
+
+    return updatedNodes;
   }
 }

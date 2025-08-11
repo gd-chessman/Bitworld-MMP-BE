@@ -34,6 +34,7 @@ import { GetAirdropTokensDto } from './dto/get-airdrop-tokens.dto';
 import { AirdropCalculateDto } from './dto/airdrop-calculate.dto';
 import { GetAirdropRewardsDto } from './dto/get-airdrop-rewards.dto';
 import { AirdropRewardsListResponseDto } from './dto/airdrop-rewards-response.dto';
+import { ChangeBgAffiliateFlowDto, ChangeBgAffiliateFlowResponseDto } from './dto/change-bg-flow.dto';
 
 @ApiTags('admin')
 @Controller('admin')
@@ -387,6 +388,19 @@ export class AdminController {
     nodeInfo?: any;
   }> {
     return this.adminService.updateBgAffiliateNodeStatus(data, req.user);
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Put('bg-affiliate/change-flow')
+  @ApiOperation({ summary: 'Change BG affiliate flow - Change upline referrer' })
+  @ApiResponse({ status: 200, description: 'BG affiliate flow changed successfully', type: ChangeBgAffiliateFlowResponseDto })
+  @ApiResponse({ status: 400, description: 'Invalid request or circular reference detected' })
+  @ApiResponse({ status: 404, description: 'Wallet or node not found' })
+  async changeBgAffiliateFlow(
+    @Request() req: any,
+    @Body() data: ChangeBgAffiliateFlowDto
+  ): Promise<ChangeBgAffiliateFlowResponseDto> {
+    return this.adminService.changeBgAffiliateFlow(data, req.user);
   }
 
 
