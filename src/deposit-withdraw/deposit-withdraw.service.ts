@@ -248,7 +248,7 @@ export class DepositWithdrawService {
           throw new BadRequestException('Sender and receiver wallet addresses must be different');
         }
       } catch (error) {
-        throw new BadRequestException('Invalid Solana wallet address');
+        throw error;
       }
 
       // Validate token mint address for SPL tokens
@@ -277,8 +277,38 @@ export class DepositWithdrawService {
       return transaction;
     } catch (error) {
       this.logger.error(`Error creating multi-token deposit/withdraw: ${error.message}`);
+      if (error.message.includes('Wallet not found')) {
+        throw new BadRequestException('Wallet not found');
+      }
+      if (error.message.includes('User wallet not found')) {
+        throw new BadRequestException('User wallet not found');
+      }
       if (error.message.includes('Invalid Solana wallet address')) {
         throw new BadRequestException('Invalid Solana wallet address');
+      }
+      if (error.message.includes('Sender and receiver wallet addresses must be different')) {
+        throw new BadRequestException('Sender and receiver wallet addresses must be different');
+      }
+      if (error.message.includes('Insufficient SOL balance for transaction fee')) {
+        throw new BadRequestException('Insufficient SOL balance for transaction fee');
+      }
+      if (error.message.includes('Insufficient token balance')) {
+        throw new BadRequestException('Insufficient token balance');
+      }
+      if (error.message.includes('Source token account not found')) {
+        throw new BadRequestException('Source token account not found');
+      }
+      if (error.message.includes('Google Auth token is required for withdrawal')) {
+        throw new BadRequestException('Google Auth token is required for withdrawal');
+      }
+      if (error.message.includes('Invalid Google Auth token')) {
+        throw new BadRequestException('Invalid Google Auth token');
+      }
+      if (error.message.includes('Token mint not found')) {
+        throw new BadRequestException('Token mint not found');
+      }
+      if (error.message.includes('Token mint address is required for SPL tokens')) {
+        throw new BadRequestException('Token mint address is required for SPL tokens');
       }
       if (error.message.includes('Attempt to debit an account but found no record of a prior credit')) {
         throw new BadRequestException('Insufficient SOL balance for transaction fee');
