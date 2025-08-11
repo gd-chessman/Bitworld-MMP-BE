@@ -280,6 +280,9 @@ export class DepositWithdrawService {
       if (error.message.includes('Invalid Solana wallet address')) {
         throw new BadRequestException('Invalid Solana wallet address');
       }
+      if (error.message.includes('Attempt to debit an account but found no record of a prior credit')) {
+        throw new BadRequestException('Insufficient SOL balance for transaction fee');
+      }
       throw new BadRequestException('Error creating multi-token deposit/withdraw');
     }
   }
