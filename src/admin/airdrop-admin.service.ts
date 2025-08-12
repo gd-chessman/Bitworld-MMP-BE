@@ -1211,7 +1211,7 @@ export class AirdropAdminService {
       // Get all rewards with status 'withdraw'
       const withdrawRewards = await this.airdropRewardRepository.find({
         where: { ar_status: AirdropRewardStatus.CAN_WITHDRAW },
-        relations: ['token', 'wallet']
+        relations: ['tokenAirdrop', 'wallet']
       });
 
       if (withdrawRewards.length === 0) {
