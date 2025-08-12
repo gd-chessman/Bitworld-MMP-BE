@@ -724,6 +724,21 @@ export class AdminController {
     return this.airdropAdminService.getAirdropRewards(getAirdropRewardsDto);
   }
 
+  @Post('set-top-round')
+  async setTopRound(@Body() setTopRoundDto: any, @Request() req) {
+    return this.airdropAdminService.setTopRound(setTopRoundDto);
+  }
+
+  @Post('airdrop-withdraw')
+  async airdropWithdraw(@Request() req) {
+    return this.airdropAdminService.processAirdropWithdraw();
+  }
+
+  @Get('get-top-round')
+  async getTopRound() {
+    return this.airdropAdminService.getTopRound();
+  }
+
   // ==================== BITTWORLD MANAGEMENT ====================
 
   @UseGuards(JwtAuthAdminGuard)

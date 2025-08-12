@@ -4,6 +4,7 @@ import { Repository, In } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { AirdropListPool, AirdropPoolStatus } from '../entities/airdrop-list-pool.entity';
 import { AirdropPoolJoin, AirdropPoolJoinStatus } from '../entities/airdrop-pool-join.entity';
+
 import { ListWallet } from '../../telegram-wallets/entities/list-wallet.entity';
 import { CreatePoolDto } from '../dto/create-pool.dto';
 import { StakePoolDto } from '../dto/join-pool.dto';
@@ -13,6 +14,7 @@ import { GetPoolDetailDto, SortField, SortOrder } from '../dto/get-pool-detail.d
 import { PoolDetailTransactionsDto, TransactionInfoDto } from '../dto/get-pool-detail-transactions-response.dto';
 import { GetPoolDetailTransactionsDto, TransactionSortField, TransactionSortOrder } from '../dto/get-pool-detail-transactions.dto';
 import { GetPoolsDto, PoolSortField, PoolSortOrder, PoolFilterType } from '../dto/get-pools.dto';
+
 import { SolanaService } from '../../solana/solana.service';
 import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
@@ -33,6 +35,7 @@ export class AirdropsService {
         private readonly airdropListPoolRepository: Repository<AirdropListPool>,
         @InjectRepository(AirdropPoolJoin)
         private readonly airdropPoolJoinRepository: Repository<AirdropPoolJoin>,
+        
         @InjectRepository(ListWallet)
         private readonly listWalletRepository: Repository<ListWallet>,
         private readonly configService: ConfigService,
@@ -784,7 +787,25 @@ export class AirdropsService {
                 // Tổng volume = volume ban đầu + tổng volume stake
                 const totalPoolVolume = Number(pool.apl_volume) + totalStakeVolume;
 
-                // 7. Tính số lượng member thực tế từ stake records (bao gồm creator)
+                // 7. Tính round volume (chỉ tính cho active round - apl_round_end và apj_round_end = null)
+                let roundPoolVolume = Number(pool.apl_volume);
+                
+                // Chỉ cộng volume ban đầu nếu pool chưa kết thúc round
+                if (pool.apl_round_end !== null) {
+                    roundPoolVolume = 0;
+                }
+                
+                // Cộng volume từ các stake chưa kết thúc round
+                const roundStakeVolume = allPoolStakes.reduce((sum, stake) => {
+                    if (stake.apj_round_end === null) {
+                        return sum + Number(stake.apj_volume);
+                    }
+                    return sum;
+                }, 0);
+                
+                roundPoolVolume += roundStakeVolume;
+
+                // 8. Tính số lượng member thực tế từ stake records (bao gồm creator)
                 const uniqueMembers = new Set<number>();
                 
                 // Thêm creator vào member count (luôn được tính)
@@ -798,7 +819,7 @@ export class AirdropsService {
                 
                 const actualMemberCount = uniqueMembers.size;
 
-                // 8. Tạo thông tin pool với user info
+                // 9. Tạo thông tin pool với user info
                 const poolInfo: PoolInfoDto = {
                     poolId: pool.alp_id,
                     name: pool.alp_name,
@@ -807,6 +828,7 @@ export class AirdropsService {
                     describe: pool.alp_describe || '',
                     memberCount: actualMemberCount,
                     totalVolume: totalPoolVolume,
+                    roundVolume: roundPoolVolume,
                     creationDate: pool.apl_creation_date,
                     endDate: pool.apl_end_date,
                     status: pool.apl_status,
@@ -814,7 +836,7 @@ export class AirdropsService {
                     creatorBittworldUid: creatorWallet?.bittworld_uid || null
                 };
 
-                // 9. Thêm thông tin stake của user nếu có
+                // 10. Thêm thông tin stake của user nếu có
                 if (userStakes.length > 0 || isCreator) {
                     // Lấy ngày stake đầu tiên hoặc ngày tạo pool
                     const firstStakeDate = userStakes.length > 0 
@@ -2015,4 +2037,9 @@ export class AirdropsService {
             throw error;
         }
     }
+
+    /**
+     * Set top round configuration for airdrop rewards
+     */
+
 } 

@@ -30,6 +30,8 @@ import { AirdropListToken } from '../airdrops/entities/airdrop-list-token.entity
 import { AirdropReward } from '../airdrops/entities/airdrop-reward.entity';
 import { AirdropPoolRound } from '../airdrops/entities/airdrop-pool-round.entity';
 import { AirdropRoundDetail } from '../airdrops/entities/airdrop-round-detail.entity';
+import { AirdropTopRound } from '../airdrops/entities/airdrop-top-round.entity';
+import { AirdropTopPools } from '../airdrops/entities/airdrop-top-pools.entity';
 import { BittworldsModule } from '../bittworlds/bittworlds.module';
 import { BittworldRewards } from '../bittworlds/entities/bittworld-rewards.entity';
 import { BittworldWithdraw } from '../bittworlds/entities/bittworld-withdraws.entity';
@@ -58,6 +60,8 @@ import { OnChainModule } from '../on-chain/on-chain.module';
       AirdropReward,
       AirdropPoolRound,
       AirdropRoundDetail,
+      AirdropTopRound,
+      AirdropTopPools,
       BittworldRewards,
       BittworldWithdraw,
     ]),

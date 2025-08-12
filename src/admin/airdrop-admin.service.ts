@@ -5,8 +5,18 @@ import { AirdropListToken, AirdropListTokenStatus } from '../airdrops/entities/a
 import { AirdropListPool, AirdropPoolStatus } from '../airdrops/entities/airdrop-list-pool.entity';
 import { AirdropPoolJoin, AirdropPoolJoinStatus } from '../airdrops/entities/airdrop-pool-join.entity';
 import { AirdropReward, AirdropRewardStatus, AirdropRewardType } from '../airdrops/entities/airdrop-reward.entity';
+import { Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js';
+import { 
+  createTransferInstruction, 
+  createAssociatedTokenAccountInstruction, 
+  getAssociatedTokenAddress,
+  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID
+} from '@solana/spl-token';
 import { AirdropPoolRound, AirdropPoolRoundStatus } from '../airdrops/entities/airdrop-pool-round.entity';
 import { AirdropRoundDetail } from '../airdrops/entities/airdrop-round-detail.entity';
+import { AirdropTopRound } from '../airdrops/entities/airdrop-top-round.entity';
+import { AirdropTopPools } from '../airdrops/entities/airdrop-top-pools.entity';
 import { CreateAirdropTokenDto } from './dto/create-airdrop-token.dto';
 import { UpdateAirdropTokenDto } from './dto/update-airdrop-token.dto';
 import { GetAirdropTokensDto } from './dto/get-airdrop-tokens.dto';
@@ -18,6 +28,15 @@ import { GetAirdropRewardsDto } from './dto/get-airdrop-rewards.dto';
 @Injectable()
 export class AirdropAdminService {
   private readonly logger = new Logger(AirdropAdminService.name);
+  private topPoolsDataForRound: Array<{
+    atp_pool_id: number;
+    atp_pool_round_id: number;
+    atp_token_id: number;
+    atp_num_top: number;
+    atp_total_volume: number;
+    atp_total_reward: number;
+    apt_percent_reward: number;
+  }> = [];
 
   constructor(
     @InjectRepository(AirdropListToken)
@@ -32,6 +51,10 @@ export class AirdropAdminService {
     private readonly airdropPoolRoundRepository: Repository<AirdropPoolRound>,
     @InjectRepository(AirdropRoundDetail)
     private readonly airdropRoundDetailRepository: Repository<AirdropRoundDetail>,
+    @InjectRepository(AirdropTopRound)
+    private readonly airdropTopRoundRepository: Repository<AirdropTopRound>,
+    @InjectRepository(AirdropTopPools)
+    private readonly airdropTopPoolsRepository: Repository<AirdropTopPools>,
     private readonly redisLockService: RedisLockService,
   ) {}
 
@@ -819,6 +842,42 @@ export class AirdropAdminService {
         );
         this.logger.log(`Updated token ${token.alt_token_name} (ID: ${token.alt_id}) status to 'end'`);
 
+        // Step 8: Calculate and distribute alt_amount_airdrop_2 rewards for top pools
+        if (token.alt_amount_airdrop_2 && token.alt_amount_airdrop_2 > 0) {
+          this.logger.log(`Processing alt_amount_airdrop_2: ${token.alt_amount_airdrop_2} for token ${token.alt_token_name}`);
+          
+          try {
+            const topPoolResult = await this.calculateTopPoolRewards(
+              token.alt_id,
+              token.alt_amount_airdrop_2,
+              roundProcessingResult.activeRoundId
+            );
+            
+            if (topPoolResult.rewards.length > 0) {
+              await this.airdropRewardRepository.save(topPoolResult.rewards);
+              this.logger.log(`Created ${topPoolResult.rewards.length} top pool rewards for token ${token.alt_token_name}`);
+              
+              // Store top pools data for later use
+              if (!this.topPoolsDataForRound) {
+                this.topPoolsDataForRound = [];
+              }
+              this.topPoolsDataForRound.push(...topPoolResult.topPoolsData);
+              
+              // Update token status_2 to 'end' after top pool rewards calculation
+              await this.airdropListTokenRepository.update(
+                { alt_id: token.alt_id },
+                { alt_status_2: AirdropListTokenStatus.END }
+              );
+              this.logger.log(`Updated token ${token.alt_token_name} (ID: ${token.alt_id}) status_2 to 'end'`);
+            }
+          } catch (error) {
+            this.logger.error(`Error calculating top pool rewards for token ${token.alt_token_name}:`, error);
+            // Continue with the process even if top pool rewards fail
+          }
+        } else {
+          this.logger.log(`No alt_amount_airdrop_2 for token ${token.alt_token_name}, skipping top pool rewards`);
+        }
+
         // Verify total calculation
         const totalRewardDistributed = rewardsToCreate.reduce((sum, reward) => sum + reward.ar_amount, 0);
         const expectedTotalReward = token.alt_amount_airdrop_1;
@@ -839,6 +898,25 @@ export class AirdropAdminService {
         });
       }
 
+      // Step 9: Update active round status to 'end' and create airdrop_top_pools records
+      if (roundProcessingResult.hasActiveRound && roundProcessingResult.activeRoundId) {
+        this.logger.log(`Updating active round ${roundProcessingResult.activeRoundId} status to 'end'`);
+        
+        // Update round status to 'end'
+        await this.airdropPoolRoundRepository.update(
+          { apr_id: roundProcessingResult.activeRoundId },
+          { apr_status: AirdropPoolRoundStatus.END }
+        );
+        
+        // Create airdrop_top_pools records for all processed tokens
+        await this.createAirdropTopPoolsRecords(
+          roundProcessingResult.activeRoundId,
+          activeTokens
+        );
+        
+        this.logger.log(`Round ${roundProcessingResult.activeRoundId} processing completed and status updated to 'end'`);
+      }
+
       this.logger.log(`Airdrop calculation completed by admin: ${currentUser.username}`);
 
       return {
@@ -853,6 +931,683 @@ export class AirdropAdminService {
       // Release the global lock
       await this.releaseAirdropCalculationLock(lockId);
       this.logger.log('Released global lock for airdrop calculation');
+    }
+  }
+
+  /**
+   * Calculate and distribute rewards for top pools based on airdrop_top_round configuration
+   */
+  private async calculateTopPoolRewards(
+    tokenId: number,
+    totalRewardAmount: number,
+    activeRoundId?: number
+  ): Promise<{
+    rewards: AirdropReward[];
+    topPoolsData: Array<{
+      atp_pool_id: number;
+      atp_pool_round_id: number;
+      atp_token_id: number;
+      atp_num_top: number;
+      atp_total_volume: number;
+      atp_total_reward: number;
+      apt_percent_reward: number;
+    }>;
+  }> {
+    try {
+      this.logger.log(`Starting top pool rewards calculation for token ${tokenId}, total amount: ${totalRewardAmount}`);
+
+      // Step 1: Get top round configuration
+      const topRoundConfig = await this.airdropTopRoundRepository.find({
+        order: { atr_num_top: 'ASC' }
+      });
+
+      if (topRoundConfig.length === 0) {
+        this.logger.log('No top round configuration found, skipping top pool rewards');
+        return { rewards: [], topPoolsData: [] };
+      }
+
+      this.logger.log(`Found ${topRoundConfig.length} top round configurations: ${topRoundConfig.map(tr => `Top${tr.atr_num_top}:${tr.atr_percent}%`).join(', ')}`);
+
+      // Step 2: Get top pools from airdrop_round_details based on active round
+      let topPoolsQuery = this.airdropRoundDetailRepository
+        .createQueryBuilder('detail')
+        .leftJoinAndSelect('detail.pool', 'pool')
+        .leftJoinAndSelect('pool.originator', 'originator')
+        .select([
+          'detail.ard_pool_id',
+          'detail.ard_total_volume',
+          'pool.alp_name',
+          'originator.wallet_id',
+          'originator.wallet_solana_address'
+        ])
+        .orderBy('detail.ard_total_volume', 'DESC')
+        .addOrderBy('detail.ard_pool_id', 'ASC') // If volume equal, sort by ID
+        .limit(topRoundConfig.length);
+
+      // If there's an active round, filter by it
+      if (activeRoundId) {
+        topPoolsQuery = topPoolsQuery.where('detail.ard_round_id = :roundId', { roundId: activeRoundId });
+        this.logger.log(`Filtering top pools by active round: ${activeRoundId}`);
+      } else {
+        this.logger.log('No active round specified, getting top pools from all rounds');
+      }
+
+      const topPools = await topPoolsQuery.getRawMany();
+
+      if (topPools.length === 0) {
+        this.logger.log('No pools found for top rewards calculation');
+        return { rewards: [], topPoolsData: [] };
+      }
+
+      this.logger.log(`Found ${topPools.length} top pools: ${topPools.map(p => `Pool${p.detail_ard_pool_id}:${p.detail_ard_total_volume}`).join(', ')}`);
+
+      // Step 3: Calculate rewards for each top pool
+      const rewards: AirdropReward[] = [];
+      const topPoolsData: Array<{
+        atp_pool_id: number;
+        atp_pool_round_id: number;
+        atp_token_id: number;
+        atp_num_top: number;
+        atp_total_volume: number;
+        atp_total_reward: number;
+        apt_percent_reward: number;
+      }> = [];
+      let totalDistributedReward = 0;
+
+      for (let i = 0; i < Math.min(topRoundConfig.length, topPools.length); i++) {
+        const config = topRoundConfig[i];
+        const pool = topPools[i];
+        
+        // Calculate reward amount based on percentage
+        const rewardAmount = (totalRewardAmount * config.atr_percent) / 100;
+        totalDistributedReward += rewardAmount;
+
+        // Create reward for pool creator
+        const reward = this.airdropRewardRepository.create({
+          ar_token_airdrop_id: tokenId,
+          ar_wallet_id: pool.originator_wallet_id,
+          ar_wallet_address: pool.originator_wallet_solana_address,
+          ar_amount: rewardAmount,
+          ar_type: AirdropRewardType.TYPE_2,
+          ar_status: AirdropRewardStatus.CAN_WITHDRAW,
+          ar_hash: null
+        });
+
+        rewards.push(reward);
+
+        // Add to top pools data
+        topPoolsData.push({
+          atp_pool_id: pool.detail_ard_pool_id,
+          atp_pool_round_id: activeRoundId || 0,
+          atp_token_id: tokenId,
+          atp_num_top: config.atr_num_top,
+          atp_total_volume: pool.detail_ard_total_volume,
+          atp_total_reward: rewardAmount,
+          apt_percent_reward: config.atr_percent
+        });
+
+        this.logger.log(`Top ${config.atr_num_top} - Pool ${pool.detail_ard_pool_id} (${pool.pool_alp_name}): volume=${pool.detail_ard_total_volume}, percentage=${config.atr_percent}%, reward=${rewardAmount}`);
+      }
+
+      // Verify total distributed reward
+      if (Math.abs(totalDistributedReward - totalRewardAmount) > 0.01) {
+        this.logger.warn(`Top pool rewards total mismatch: distributed ${totalDistributedReward} vs expected ${totalRewardAmount}`);
+      }
+
+      this.logger.log(`Top pool rewards calculation completed: ${rewards.length} rewards created, total distributed: ${totalDistributedReward}`);
+
+      return {
+        rewards,
+        topPoolsData
+      };
+
+    } catch (error) {
+      this.logger.error(`Error in calculateTopPoolRewards: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Get current top round configuration
+   */
+  async getTopRound() {
+    try {
+      this.logger.log('Getting current top round configuration');
+
+      // Get all top round configurations
+      const topRounds = await this.airdropTopRoundRepository.find({
+        order: { atr_num_top: 'ASC' }
+      });
+
+      if (topRounds.length === 0) {
+        this.logger.log('No top round configuration found');
+        return {
+          success: true,
+          message: 'No top round configuration found',
+          data: {
+            count_top: 0,
+            top_rounds: []
+          }
+        };
+      }
+
+      this.logger.log(`Found ${topRounds.length} top round configurations`);
+
+      // Format response
+      const formattedTopRounds = topRounds.map(tr => ({
+        atr_num_top: tr.atr_num_top,
+        atr_percent: tr.atr_percent
+      }));
+
+      return {
+        success: true,
+        message: 'Top round configuration retrieved successfully',
+        data: {
+          count_top: topRounds.length,
+          top_rounds: formattedTopRounds
+        }
+      };
+
+    } catch (error) {
+      this.logger.error(`Error getting top round configuration: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Set top round configuration for airdrop rewards
+   */
+  async setTopRound(setTopRoundDto: any) {
+    try {
+      const { count_top, top_rounds } = setTopRoundDto;
+      
+      this.logger.log(`Setting top round configuration: count_top=${count_top}, top_rounds=${JSON.stringify(top_rounds)}`);
+
+      // If count_top = 0, clear all records
+      if (count_top === 0) {
+        await this.airdropTopRoundRepository.clear();
+        this.logger.log('Cleared all top round configurations');
+        return { success: true, message: 'All top round configurations cleared' };
+      }
+
+      // Validate count_top
+      if (count_top < 1 || count_top > 10) {
+        throw new Error('count_top must be between 1 and 10');
+      }
+
+      // Validate top_rounds array
+      if (!top_rounds || !Array.isArray(top_rounds) || top_rounds.length !== count_top) {
+        throw new Error('top_rounds array length must match count_top');
+      }
+
+      let totalPercent = 0;
+      const validatedTopRounds: Array<{ atr_num_top: number; atr_percent: number }> = [];
+
+      for (const topRound of top_rounds) {
+        // Validate sequential numbering
+        if (topRound.atr_num_top !== validatedTopRounds.length + 1) {
+          throw new Error(`atr_num_top must be sequential starting from 1`);
+        }
+
+        // Validate percentage range
+        if (topRound.atr_percent <= 0 || topRound.atr_percent >= 100) {
+          throw new Error(`atr_percent must be between 1 and 99 for top ${topRound.atr_num_top}`);
+        }
+
+        validatedTopRounds.push({
+          atr_num_top: topRound.atr_num_top,
+          atr_percent: topRound.atr_percent
+        });
+
+        totalPercent += topRound.atr_percent;
+      }
+
+      // Validate total percentage
+      if (totalPercent > 100) {
+        throw new Error(`Total percentage (${totalPercent}%) cannot exceed 100%`);
+      }
+
+      // Clear existing records
+      await this.airdropTopRoundRepository.clear();
+      this.logger.log('Cleared existing top round configurations');
+
+      // Create new records
+      const newTopRounds = validatedTopRounds.map(topRound => {
+        const entity = new AirdropTopRound();
+        entity.atr_num_top = topRound.atr_num_top;
+        entity.atr_percent = topRound.atr_percent;
+        return entity;
+      });
+
+      const savedTopRounds = await this.airdropTopRoundRepository.save(newTopRounds);
+      
+      this.logger.log(`Successfully created ${savedTopRounds.length} top round configurations`);
+
+      return {
+        success: true,
+        message: 'Top round configuration updated successfully',
+        data: {
+          count_top: savedTopRounds.length,
+          top_rounds: savedTopRounds.map(tr => ({
+            atr_num_top: tr.atr_num_top,
+            atr_percent: tr.atr_percent
+          }))
+        }
+      };
+
+    } catch (error) {
+      this.logger.error(`Error setting top round configuration: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Process airdrop withdrawals for rewards with status 'withdraw'
+   */
+  async processAirdropWithdraw() {
+    try {
+      this.logger.log('Starting airdrop withdrawal process');
+
+      // Get all rewards with status 'withdraw'
+      const withdrawRewards = await this.airdropRewardRepository.find({
+        where: { ar_status: AirdropRewardStatus.CAN_WITHDRAW },
+        relations: ['token', 'wallet']
+      });
+
+      if (withdrawRewards.length === 0) {
+        this.logger.log('No rewards found with status "withdraw"');
+        return {
+          success: true,
+          message: 'No rewards to withdraw',
+          processed: 0,
+          total: 0
+        };
+      }
+
+      this.logger.log(`Found ${withdrawRewards.length} rewards to withdraw`);
+
+      let successCount = 0;
+      let errorCount = 0;
+      const results: any[] = [];
+
+      // Process each reward
+      for (const reward of withdrawRewards) {
+        try {
+          this.logger.log(`Processing withdrawal for reward ID: ${reward.ar_id}, wallet: ${reward.ar_wallet_address}, amount: ${reward.ar_amount}`);
+
+          // Get token mint address
+          const token = await this.airdropListTokenRepository.findOne({
+            where: { alt_id: reward.ar_token_airdrop_id }
+          });
+
+          if (!token) {
+            this.logger.error(`Token not found for reward ID: ${reward.ar_id}`);
+            errorCount++;
+            results.push({
+              reward_id: reward.ar_id,
+              status: 'error',
+              error: 'Token not found'
+            });
+            continue;
+          }
+
+          // Process withdrawal transaction
+          const withdrawalResult = await this.processSingleWithdrawal(
+            reward,
+            token.alt_token_mint,
+            reward.ar_wallet_address,
+            reward.ar_amount
+          );
+
+          if (withdrawalResult.success) {
+            // Update reward status to 'withdrawn'
+            await this.airdropRewardRepository.update(
+              { ar_id: reward.ar_id },
+              {
+                ar_status: AirdropRewardStatus.WITHDRAWN,
+                ar_hash: withdrawalResult.transactionHash
+              }
+            );
+
+            successCount++;
+            results.push({
+              reward_id: reward.ar_id,
+              status: 'success',
+              transaction_hash: withdrawalResult.transactionHash,
+              amount: reward.ar_amount
+            });
+
+            this.logger.log(`Successfully withdrew reward ID: ${reward.ar_id}, transaction: ${withdrawalResult.transactionHash}`);
+          } else {
+            errorCount++;
+            results.push({
+              reward_id: reward.ar_id,
+              status: 'error',
+              error: withdrawalResult.error
+            });
+
+            this.logger.error(`Failed to withdraw reward ID: ${reward.ar_id}: ${withdrawalResult.error}`);
+          }
+
+        } catch (error) {
+          this.logger.error(`Error processing withdrawal for reward ID: ${reward.ar_id}: ${error.message}`);
+          errorCount++;
+          results.push({
+            reward_id: reward.ar_id,
+            status: 'error',
+            error: error.message
+          });
+        }
+      }
+
+      this.logger.log(`Airdrop withdrawal process completed. Success: ${successCount}, Errors: ${errorCount}`);
+
+      return {
+        success: true,
+        message: 'Airdrop withdrawal process completed',
+        processed: withdrawRewards.length,
+        success_count: successCount,
+        error_count: errorCount,
+        results
+      };
+
+    } catch (error) {
+      this.logger.error(`Error in processAirdropWithdraw: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Process single withdrawal transaction
+   */
+  private async processSingleWithdrawal(
+    reward: AirdropReward,
+    tokenMint: string,
+    recipientAddress: string,
+    amount: number
+  ): Promise<{ success: boolean; transactionHash?: string; error?: string }> {
+    try {
+      // Get withdraw wallet private key from environment
+      const withdrawWalletPrivateKey = process.env.WALLET_WITHDRAW_REWARD;
+      if (!withdrawWalletPrivateKey) {
+        throw new Error('WALLET_WITHDRAW_REWARD environment variable not configured');
+      }
+
+      // Parse private key
+      let privateKey: string;
+      try {
+        const parsed = JSON.parse(withdrawWalletPrivateKey);
+        privateKey = parsed.solana || parsed.privateKey || withdrawWalletPrivateKey;
+      } catch {
+        privateKey = withdrawWalletPrivateKey;
+      }
+
+      // Create keypair
+      const keypair = Keypair.fromSecretKey(
+        new Uint8Array(privateKey.split(',').map(Number))
+      );
+
+      // Get Solana connection
+      const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+
+      // Get token mint info and determine program type
+      const mintPublicKey = new PublicKey(tokenMint);
+      const { tokenInfo, programType } = await this.getTokenInfoAndProgramType(mintPublicKey);
+
+      this.logger.log(`Processing withdrawal for token ${tokenMint} with program type: ${programType}`);
+
+      // Calculate raw amount based on token decimals
+      const rawAmount = amount * Math.pow(10, tokenInfo.decimals);
+
+      // Get or create ATA for recipient based on program type
+      const recipientATA = await this.getOrCreateATA(
+        mintPublicKey,
+        new PublicKey(recipientAddress),
+        connection,
+        programType
+      );
+
+      // Get or create ATA for sender (withdraw wallet) based on program type
+      const senderATA = await this.getOrCreateATA(
+        mintPublicKey,
+        keypair.publicKey,
+        connection,
+        programType
+      );
+
+      // Check sender balance
+      const senderBalance = await connection.getTokenAccountBalance(senderATA);
+      if (parseInt(senderBalance.value.amount) < rawAmount) {
+        throw new Error(`Insufficient balance. Required: ${rawAmount}, Available: ${senderBalance.value.amount}`);
+      }
+
+      // Create transfer instruction based on program type
+      let transferInstruction;
+      if (programType === 'spl-token-2022') {
+        // Use SPL Token-2022 program
+        transferInstruction = createTransferInstruction(
+          senderATA,
+          recipientATA,
+          keypair.publicKey,
+          rawAmount,
+          [],
+          TOKEN_2022_PROGRAM_ID
+        );
+      } else {
+        // Use standard SPL Token program
+        transferInstruction = createTransferInstruction(
+          senderATA,
+          recipientATA,
+          keypair.publicKey,
+          rawAmount
+        );
+      }
+
+      // Create transaction
+      const transaction = new Transaction().add(transferInstruction);
+      transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+      transaction.feePayer = keypair.publicKey;
+
+      // Sign and send transaction
+      const signature = await connection.sendTransaction(transaction, [keypair]);
+      
+      // Wait for confirmation
+      const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+      
+      if (confirmation.value.err) {
+        throw new Error(`Transaction failed: ${confirmation.value.err}`);
+      }
+
+      this.logger.log(`Withdrawal transaction successful: ${signature} for ${programType} token`);
+
+      return {
+        success: true,
+        transactionHash: signature
+      };
+
+    } catch (error) {
+      this.logger.error(`Error in processSingleWithdrawal: ${error.message}`);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Get token info and determine program type from Solana
+   */
+  private async getTokenInfoAndProgramType(mint: PublicKey): Promise<{ 
+    tokenInfo: { decimals: number; symbol: string; name: string }; 
+    programType: 'spl-token' | 'spl-token-2022' 
+  }> {
+    try {
+      const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+      
+      // Try to get token info
+      const mintInfo = await connection.getParsedAccountInfo(mint);
+      
+      if (mintInfo.value?.data) {
+        const parsedData = mintInfo.value.data as any;
+        if (parsedData.parsed?.info) {
+          // Determine program type based on owner
+          const owner = mintInfo.value.owner.toString();
+          const programType = owner === TOKEN_2022_PROGRAM_ID.toString() ? 'spl-token-2022' : 'spl-token';
+          
+          this.logger.log(`Token ${mint.toString()} uses program: ${programType} (owner: ${owner})`);
+          
+          return {
+            tokenInfo: {
+              decimals: parsedData.parsed.info.decimals,
+              symbol: parsedData.parsed.info.symbol,
+              name: parsedData.parsed.info.name
+            },
+            programType
+          };
+        }
+      }
+
+      // Fallback to default values and try to determine program type
+      try {
+        const accountInfo = await connection.getAccountInfo(mint);
+        if (accountInfo) {
+          const owner = accountInfo.owner.toString();
+          const programType = owner === TOKEN_2022_PROGRAM_ID.toString() ? 'spl-token-2022' : 'spl-token';
+          
+          this.logger.log(`Token ${mint.toString()} uses program: ${programType} (owner: ${owner})`);
+          
+          return {
+            tokenInfo: {
+              decimals: 6,
+              symbol: 'TOKEN',
+              name: 'Unknown Token'
+            },
+            programType
+          };
+        }
+      } catch (fallbackError) {
+        this.logger.warn(`Could not determine program type for ${mint.toString()}: ${fallbackError.message}`);
+      }
+
+      // Default fallback
+      this.logger.warn(`Using default SPL Token program for ${mint.toString()}`);
+      return {
+        tokenInfo: {
+          decimals: 6,
+          symbol: 'TOKEN',
+          name: 'Unknown Token'
+        },
+        programType: 'spl-token'
+      };
+    } catch (error) {
+      this.logger.warn(`Could not get token info for ${mint.toString()}, using defaults: ${error.message}`);
+      return {
+        tokenInfo: {
+          decimals: 6,
+          symbol: 'TOKEN',
+          name: 'Unknown Token'
+        },
+        programType: 'spl-token'
+      };
+    }
+  }
+
+  /**
+   * Get token info from Solana (legacy method for backward compatibility)
+   */
+  private async getTokenInfo(mint: PublicKey): Promise<{ decimals: number; symbol: string; name: string }> {
+    const result = await this.getTokenInfoAndProgramType(mint);
+    return result.tokenInfo;
+  }
+
+  /**
+   * Get or create Associated Token Account
+   */
+  private async getOrCreateATA(
+    mint: PublicKey,
+    owner: PublicKey,
+    connection: Connection,
+    programType: 'spl-token' | 'spl-token-2022' = 'spl-token'
+  ): Promise<PublicKey> {
+    try {
+      // Determine program ID based on program type
+      const programId = programType === 'spl-token-2022' ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+      
+      this.logger.log(`Creating/getting ATA for ${programType} program: ${programId.toString()}`);
+
+      // Try to get existing ATA
+      const ata = await getAssociatedTokenAddress(mint, owner, false, programId);
+      const accountInfo = await connection.getAccountInfo(ata);
+      
+      if (accountInfo) {
+        this.logger.log(`ATA already exists: ${ata.toString()}`);
+        return ata;
+      }
+
+      // Create ATA if it doesn't exist
+      const createAtaInstruction = createAssociatedTokenAccountInstruction(
+        owner,
+        ata,
+        owner,
+        mint,
+        programId
+      );
+
+      const transaction = new Transaction().add(createAtaInstruction);
+      transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+      transaction.feePayer = owner;
+
+      const signature = await connection.sendTransaction(transaction, []);
+      await connection.confirmTransaction(signature, 'confirmed');
+
+      this.logger.log(`Created new ATA: ${ata.toString()} for ${programType} program`);
+
+      return ata;
+    } catch (error) {
+      this.logger.error(`Error creating ATA for ${programType} program: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Create airdrop_top_pools records for the processed round
+   */
+  private async createAirdropTopPoolsRecords(
+    roundId: number,
+    activeTokens: AirdropListToken[]
+  ): Promise<void> {
+    try {
+      this.logger.log(`Creating airdrop_top_pools records for round ${roundId} with ${this.topPoolsDataForRound.length} top pools data`);
+
+      if (this.topPoolsDataForRound.length === 0) {
+        this.logger.log('No top pools data to save, skipping airdrop_top_pools creation');
+        return;
+      }
+
+      // Create AirdropTopPools entities
+      const topPoolsEntities = this.topPoolsDataForRound.map(data => {
+        const entity = new AirdropTopPools();
+        entity.atp_pool_id = data.atp_pool_id;
+        entity.atp_pool_round_id = data.atp_pool_round_id;
+        entity.atp_token_id = data.atp_token_id;
+        entity.atp_num_top = data.atp_num_top;
+        entity.atp_total_volume = data.atp_total_volume;
+        entity.atp_total_reward = data.atp_total_reward;
+        entity.apt_percent_reward = data.apt_percent_reward;
+        return entity;
+      });
+
+      // Save to database
+      await this.airdropTopPoolsRepository.save(topPoolsEntities);
+      
+      this.logger.log(`Successfully created ${topPoolsEntities.length} airdrop_top_pools records for round ${roundId}`);
+
+      // Clear the data for next round
+      this.topPoolsDataForRound = [];
+
+    } catch (error) {
+      this.logger.error(`Error creating airdrop_top_pools records: ${error.message}`);
+      throw error;
     }
   }
 } 

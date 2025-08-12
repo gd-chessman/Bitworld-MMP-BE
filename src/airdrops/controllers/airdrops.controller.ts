@@ -17,6 +17,7 @@ import { GetPoolDetailTransactionsDto } from '../dto/get-pool-detail-transaction
 import { UpdatePoolDto } from '../dto/update-pool.dto';
 import { UpdatePoolResponseDto } from '../dto/update-pool-response.dto';
 
+
 @ApiTags('Airdrops')
 @Controller('airdrops')
 @UseGuards(AirdropJwtAuthGuard)
@@ -371,4 +372,6 @@ export class AirdropsController {
             data: poolDetailTransactions
         };
     }
+
+
 } 

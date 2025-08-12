@@ -44,6 +44,12 @@ export class PoolInfoDto {
     totalVolume: number;
 
     @ApiProperty({
+        description: 'Volume của round hiện tại (chỉ tính cho active round - apl_round_end và apj_round_end = null)',
+        example: 3000000
+    })
+    roundVolume: number;
+
+    @ApiProperty({
         description: 'Ngày tạo pool',
         example: '2024-01-15T10:30:00.000Z'
     })
