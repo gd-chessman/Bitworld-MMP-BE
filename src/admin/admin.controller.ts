@@ -35,6 +35,7 @@ import { AirdropCalculateDto } from './dto/airdrop-calculate.dto';
 import { GetAirdropRewardsDto } from './dto/get-airdrop-rewards.dto';
 import { AirdropRewardsListResponseDto } from './dto/airdrop-rewards-response.dto';
 import { ChangeBgAffiliateFlowDto, ChangeBgAffiliateFlowResponseDto } from './dto/change-bg-flow.dto';
+import { SendLeaderboardEmailResponseDto } from './dto/airdrop-staking-leaderboard.dto';
 
 @ApiTags('admin')
 @Controller('admin')
@@ -719,6 +720,7 @@ export class AdminController {
   @ApiQuery({ name: 'token_mint', required: false, type: String, description: 'Filter by token mint address' })
   @ApiQuery({ name: 'alt_id', required: false, type: Number, description: 'Filter by token ID' })
   @ApiQuery({ name: 'status', required: false, enum: ['can_withdraw', 'withdrawn'], description: 'Filter by reward status' })
+  @ApiQuery({ name: 'type', required: false, enum: ['1', '2'], description: 'Filter by reward type: 1 = TYPE_1 (volume-based), 2 = TYPE_2 (top pool)' })
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search by wallet address or email' })
   async getAirdropRewards(@Query() getAirdropRewardsDto: GetAirdropRewardsDto): Promise<AirdropRewardsListResponseDto> {
     return this.airdropAdminService.getAirdropRewards(getAirdropRewardsDto);
@@ -737,6 +739,44 @@ export class AdminController {
   @Get('get-top-round')
   async getTopRound() {
     return this.airdropAdminService.getTopRound();
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Post('airdrop-pools/send-mail-leaderboard')
+  @ApiOperation({ summary: 'Send airdrop pools leaderboard email report' })
+  @ApiResponse({ status: 200, description: 'Leaderboard email sent successfully', type: SendLeaderboardEmailResponseDto })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can send leaderboard email' })
+  @ApiResponse({ status: 500, description: 'Failed to send email' })
+  async sendAirdropLeaderboardEmail(@Request() req: any): Promise<SendLeaderboardEmailResponseDto> {
+    return this.adminService.sendAirdropLeaderboardEmail();
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Get('airdrop-pools/scheduler-status')
+  @ApiOperation({ summary: 'Get scheduler status and next run time' })
+  @ApiResponse({ status: 200, description: 'Scheduler status retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can view scheduler status' })
+  async getSchedulerStatus(@Request() req: any) {
+    return this.adminService.getSchedulerStatus();
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Post('airdrop-pools/test-scheduler')
+  @ApiOperation({ summary: 'Test scheduler immediately (for debugging)' })
+  @ApiResponse({ status: 200, description: 'Scheduler test completed' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can test scheduler' })
+  async testScheduler(@Request() req: any) {
+    return this.adminService.sendScheduledLeaderboardEmail();
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Get('airdrop-pools/scheduler-lock-status')
+  @ApiOperation({ summary: 'Get scheduler lock status to check if email is being sent' })
+  @ApiResponse({ status: 200, description: 'Scheduler lock status retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can view lock status' })
+  async getSchedulerLockStatus(@Request() req: any) {
+    // Cần inject ScheduledTasksService vào AdminController
+    return { message: 'Lock status endpoint - need to inject ScheduledTasksService' };
   }
 
   // ==================== BITTWORLD MANAGEMENT ====================

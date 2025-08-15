@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, OnModuleInit, UnauthorizedException, ConflictException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit, UnauthorizedException, ConflictException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { SolanaListCategoriesToken, CategoryPrioritize, CategoryStatus } from '../solana/entities/solana-list-categories-token.entity';
@@ -35,9 +35,13 @@ import { BittworldsService } from '../bittworlds/services/bittworlds.service';
 import { BittworldRewards } from '../bittworlds/entities/bittworld-rewards.entity';
 import { BittworldWithdraw } from '../bittworlds/entities/bittworld-withdraws.entity';
 import { SolanaTrackerService } from '../on-chain/solana-tracker.service';
+import { ConfigService } from '@nestjs/config';
+import * as nodemailer from 'nodemailer';
 
 @Injectable()
 export class AdminService implements OnModuleInit {
+  private readonly logger = new Logger(AdminService.name);
+  
   constructor(
     @InjectRepository(UserAdmin)
     private userAdminRepository: Repository<UserAdmin>,
@@ -74,6 +78,7 @@ export class AdminService implements OnModuleInit {
     @InjectRepository(BittworldWithdraw)
     private bittworldWithdrawRepository: Repository<BittworldWithdraw>,
     private readonly solanaTrackerService: SolanaTrackerService,
+    private readonly configService: ConfigService,
   ) {
     // Initialize swap settings on app start
     this.initializeSwapSettings();
@@ -3604,5 +3609,311 @@ export class AdminService implements OnModuleInit {
     }
 
     return updatedNodes;
+  }
+
+    /**
+   * Gửi email leaderboard airdrop pools
+   */
+  async sendAirdropLeaderboardEmail(): Promise<{
+    success: boolean;
+    message: string;
+    emailSent: boolean;
+    recipients: string[];
+    vip5Count: number;
+    vip6Count: number;
+    vip7Count: number;
+  }> {
+    try {
+      const smtpHost = this.configService.get<string>('SMTP_HOST');
+      const smtpPort = this.configService.get<number>('SMTP_PORT');
+      const smtpUser = this.configService.get<string>('SMTP_USER');
+      const smtpPass = this.configService.get<string>('SMTP_PASS');
+      const emailNotify = this.configService.get<string>('EMAIL_NOTIFY');
+
+      if (!smtpHost || !smtpPort || !smtpUser || !smtpPass) {
+        throw new Error('SMTP configuration is missing in environment variables');
+      }
+
+      if (!emailNotify) {
+        throw new Error('EMAIL_NOTIFY is missing in environment variables');
+      }
+
+      // Parse email addresses từ EMAIL_NOTIFY (hỗ trợ dấu phẩy và khoảng trắng)
+      const emailAddresses = this.parseEmailAddresses(emailNotify);
+      
+      if (emailAddresses.length === 0) {
+        throw new Error('No valid email addresses found in EMAIL_NOTIFY');
+      }
+
+      // Lấy dữ liệu leaderboard cho từng VIP level
+      const vip5Data = await this.getAirdropPoolsStakingLeaderboard(1, 100, 10000000, 19999999);
+      const vip6Data = await this.getAirdropPoolsStakingLeaderboard(1, 100, 20000000, 29999999);
+      const vip7Data = await this.getAirdropPoolsStakingLeaderboard(1, 100, 30000000);
+
+      // Tạo nội dung email
+      const emailContent = this.generateLeaderboardEmailContent(vip5Data, vip6Data, vip7Data);
+
+      // Gửi email đến tất cả địa chỉ
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
+
+      // Gửi email đến từng địa chỉ riêng biệt để tracking tốt hơn
+      const emailResults = await Promise.allSettled(
+        emailAddresses.map(async (email) => {
+          const mailOptions = {
+            from: smtpUser,
+            to: email,
+            subject: 'Airdrop Pools Leaderboard Report',
+            html: emailContent,
+          };
+          
+          return await transporter.sendMail(mailOptions);
+        })
+      );
+
+      // Đếm số email gửi thành công
+      const successfulEmails = emailResults.filter(result => result.status === 'fulfilled').length;
+      const failedEmails = emailResults.filter(result => result.status === 'rejected').length;
+
+      if (successfulEmails === 0) {
+        throw new Error('Failed to send email to any recipient');
+      }
+
+      const message = failedEmails > 0 
+        ? `Leaderboard email sent successfully to ${successfulEmails} recipients, failed to ${failedEmails} recipients`
+        : `Leaderboard email sent successfully to all ${successfulEmails} recipients`;
+
+      return {
+        success: true,
+        message,
+        emailSent: successfulEmails > 0,
+        recipients: emailAddresses,
+        vip5Count: vip5Data.data.length,
+        vip6Count: vip6Data.data.length,
+        vip7Count: vip7Data.data.length,
+      };
+
+    } catch (error) {
+      return {
+        success: false,
+        message: `Failed to send leaderboard email: ${error.message}`,
+        emailSent: false,
+        recipients: [],
+        vip5Count: 0,
+        vip6Count: 0,
+        vip7Count: 0,
+      };
+      }
+    }
+
+  /**
+   * Parse email addresses từ chuỗi EMAIL_NOTIFY
+   * Hỗ trợ format: email1@gmail.com,email2@gmail.com hoặc email1@gmail.com, email2@gmail.com
+   */
+  private parseEmailAddresses(emailNotify: string): string[] {
+    if (!emailNotify || emailNotify.trim() === '') {
+      return [];
+    }
+
+    // Tách theo dấu phẩy và loại bỏ khoảng trắng
+    const emails = emailNotify
+      .split(',')
+      .map(email => email.trim())
+      .filter(email => email.length > 0);
+
+    // Validate email format cơ bản
+    const validEmails = emails.filter(email => {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      return emailRegex.test(email);
+    });
+
+    return validEmails;
+  }
+
+  /**
+   * Tạo nội dung email leaderboard
+   */
+  private generateLeaderboardEmailContent(
+    vip5Data: any,
+    vip6Data: any,
+    vip7Data: any
+  ): string {
+    const formatNumber = (num: number): string => {
+      return num.toLocaleString();
+    };
+
+    const generateVipTable = (data: any[], vipLevel: string): string => {
+      if (data.length === 0) {
+        return `<p><strong>VIP${vipLevel}</strong> 에 있는 사람들 정보</p>
+                <p>데이터가 없습니다.</p>`;
+      }
+
+      let table = `
+        <p><strong>VIP${vipLevel}</strong> 에 있는 사람들 정보</p>
+        <table style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">
+          <thead>
+            <tr style="background-color: #f2f2f2;">
+              <th style="border: 1px solid #ddd; padding: 8px; text-align: center;">순위</th>
+              <th style="border: 1px solid #ddd; padding: 8px; text-align: center;">Bittworld UID</th>
+              <th style="border: 1px solid #ddd; padding: 8px; text-align: center;">닉네임</th>
+              <th style="border: 1px solid #ddd; padding: 8px; text-align: center;">BITT 스테이킹 수량</th>
+            </tr>
+          </thead>
+          <tbody>`;
+
+      data.forEach((item, index) => {
+        const bittworldUid = item.bittworldUid || 'N/A';
+        const nickName = item.nickName || 'Unknown';
+        const stakedVolume = formatNumber(item.stakedVolume);
+
+        table += `
+          <tr>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">${index + 1}.</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">${bittworldUid}</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">${nickName}</td>
+            <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">${stakedVolume}</td>
+          </tr>`;
+      });
+
+      table += `
+          </tbody>
+        </table>`;
+
+      return table;
+    };
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Airdrop Pools Leaderboard Report</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          .container { max-width: 800px; margin: 0 auto; }
+          .header { text-align: center; margin-bottom: 30px; }
+          .vip-section { margin-bottom: 30px; }
+          table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+          th { background-color: #f2f2f2; font-weight: bold; }
+          .summary { background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>🚀 Airdrop Pools Leaderboard Report</h1>
+            <p>생성 시간: ${new Date().toLocaleString('ko-KR')}</p>
+          </div>
+
+          <div class="summary">
+            <h3>📊 요약</h3>
+            <p><strong>VIP5:</strong> ${vip5Data.data.length}명 (10,000,000 - 19,999,999 BITT)</p>
+            <p><strong>VIP6:</strong> ${vip6Data.data.length}명 (20,000,000 - 29,999,999 BITT)</p>
+            <p><strong>VIP7:</strong> ${vip7Data.data.length}명 (30,000,000+ BITT)</p>
+          </div>
+
+          <div class="vip-section">
+            ${generateVipTable(vip5Data.data, '5')}
+          </div>
+
+          <div class="vip-section">
+            ${generateVipTable(vip6Data.data, '6')}
+          </div>
+
+          <div class="vip-section">
+            ${generateVipTable(vip7Data.data, '7')}
+          </div>
+
+          <div style="margin-top: 30px; padding: 15px; background-color: #f0f8ff; border-radius: 5px;">
+            <p><em>이 이메일은 자동으로 생성되었습니다. 문의사항이 있으시면 관리자에게 연락해 주세요.</em></p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    return htmlContent;
+  }
+
+  /**
+   * Method để gọi từ scheduler - tự động gửi email leaderboard
+   */
+  async sendScheduledLeaderboardEmail(): Promise<void> {
+    try {
+      this.logger.log('🕐 Starting scheduled leaderboard email sending at 15:00 UTC...');
+      
+      const result = await this.sendAirdropLeaderboardEmail();
+      
+      if (result.success && result.emailSent) {
+        this.logger.log(`✅ Scheduled leaderboard email sent successfully! VIP5: ${result.vip5Count}, VIP6: ${result.vip6Count}, VIP7: ${result.vip7Count}`);
+        this.logger.log(`📧 Email sent to ${result.recipients.length} recipients: ${result.recipients.join(', ')}`);
+      } else {
+        this.logger.error(`❌ Failed to send scheduled leaderboard email: ${result.message}`);
+      }
+    } catch (error) {
+      this.logger.error(`❌ Error in scheduled leaderboard email: ${error.message}`);
+    }
+  }
+
+  /**
+   * Lấy trạng thái scheduler và thời gian chạy tiếp theo
+   */
+  async getSchedulerStatus(): Promise<{
+    schedulerActive: boolean;
+    nextRunTime: string;
+    cronExpression: string;
+    timezone: string;
+    lastRunTime?: string;
+    description: string;
+    debugInfo: {
+      serverStartTime: string;
+      currentTime: string;
+      currentTimeUTC: string;
+      timeUntilNextRun: string;
+      nextRunDate: string;
+    };
+  }> {
+    try {
+      // Tính thời gian chạy tiếp theo (15:00 UTC mỗi ngày)
+      const now = new Date();
+      const nextRun = new Date();
+      nextRun.setUTCHours(15, 0, 0, 0);
+      
+      // Nếu hôm nay đã qua 15:00, thì chạy vào ngày mai
+      if (now.getUTCHours() > 15 || (now.getUTCHours() === 15 && now.getUTCMinutes() >= 0)) {
+        nextRun.setUTCDate(nextRun.getUTCDate() + 1);
+      }
+
+      // Tính thời gian còn lại đến lần chạy tiếp theo
+      const timeUntilNextRun = nextRun.getTime() - now.getTime();
+      const hours = Math.floor(timeUntilNextRun / (1000 * 60 * 60));
+      const minutes = Math.floor((timeUntilNextRun % (1000 * 60 * 60)) / (1000 * 60));
+
+      return {
+        schedulerActive: true,
+        nextRunTime: nextRun.toISOString(),
+        cronExpression: '0 15 * * *',
+        timezone: 'UTC',
+        description: 'Daily leaderboard email at 15:00 UTC (22:00 Vietnam time)',
+        debugInfo: {
+          serverStartTime: new Date(process.uptime() * 1000).toISOString(),
+          currentTime: now.toISOString(),
+          currentTimeUTC: now.toUTCString(),
+          timeUntilNextRun: `${hours}h ${minutes}m`,
+          nextRunDate: nextRun.toUTCString(),
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Error getting scheduler status: ${error.message}`);
+      throw error;
+    }
   }
 }

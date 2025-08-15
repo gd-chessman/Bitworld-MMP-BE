@@ -312,7 +312,7 @@ export class AirdropAdminService {
   }
 
   async getAirdropRewards(getAirdropRewardsDto: GetAirdropRewardsDto) {
-    const { page = 1, limit = 20, token_mint, alt_id, status = AirdropRewardStatus.CAN_WITHDRAW, search } = getAirdropRewardsDto;
+    const { page = 1, limit = 20, token_mint, alt_id, status = AirdropRewardStatus.CAN_WITHDRAW, search, type } = getAirdropRewardsDto;
 
     const offset = (page - 1) * limit;
 
@@ -348,6 +348,10 @@ export class AirdropAdminService {
 
     if (alt_id) {
       queryBuilder.andWhere('reward.ar_token_airdrop_id = :alt_id', { alt_id });
+    }
+
+    if (type) {
+      queryBuilder.andWhere('reward.ar_type = :type', { type });
     }
 
     if (search) {
@@ -1208,7 +1212,7 @@ export class AirdropAdminService {
     try {
       this.logger.log('Starting airdrop withdrawal process');
 
-      // Get all rewards with status 'withdraw'
+      // Get all rewards with status 'withdraw' 
       const withdrawRewards = await this.airdropRewardRepository.find({
         where: { ar_status: AirdropRewardStatus.CAN_WITHDRAW },
         relations: ['tokenAirdrop', 'wallet']

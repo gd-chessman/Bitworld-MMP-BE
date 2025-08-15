@@ -2,6 +2,8 @@ import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
+import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { AdminGateway } from './admin.gateway';
@@ -38,9 +40,12 @@ import { BittworldWithdraw } from '../bittworlds/entities/bittworld-withdraws.en
 import { AirdropAdminService } from './airdrop-admin.service';
 import { SharedModule } from '../shared/shared.module';
 import { OnChainModule } from '../on-chain/on-chain.module';
+import { ScheduledTasksService } from './scheduled-tasks.service';
 
 @Module({
   imports: [
+    ConfigModule,
+    ScheduleModule.forRoot(),
     TypeOrmModule.forFeature([
       ListWallet, 
       SolanaListCategoriesToken, 
@@ -85,7 +90,7 @@ import { OnChainModule } from '../on-chain/on-chain.module';
     OnChainModule,
   ],
   controllers: [AdminController],
-  providers: [AdminService, AdminGateway, AdminJwtStrategy, AirdropAdminService],
+  providers: [AdminService, AdminGateway, AdminJwtStrategy, AirdropAdminService, ScheduledTasksService],
   exports: [AdminService, AdminGateway],
 })
 export class AdminModule implements OnModuleInit {
