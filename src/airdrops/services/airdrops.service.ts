@@ -403,10 +403,6 @@ export class AirdropsService {
                 throw new BadRequestException('Stake amount must be greater than 0');
             }
 
-            if (stakePoolDto.stakeAmount < 0.001) {
-                throw new BadRequestException('Minimum stake amount is 0.001 token');
-            }
-
             // Check if stake amount is reasonable (not too large)
             if (stakePoolDto.stakeAmount > 1000000000) {
                 throw new BadRequestException('Stake amount cannot exceed 1 billion tokens');
@@ -436,7 +432,16 @@ export class AirdropsService {
             // Check if user is the creator of this pool
             const isCreator = pool.alp_originator === walletId;
 
-            // 3. Get wallet information
+            // 3. Validate minimum stake amount based on user role
+            if (!isCreator && stakePoolDto.stakeAmount < 1000000) {
+                throw new BadRequestException('Minimum stake amount is 1,000,000 BITT for non-creator users');
+            }
+
+            if (isCreator && stakePoolDto.stakeAmount <= 0) {
+                throw new BadRequestException('Stake amount must be greater than 0 for pool creator');
+            }
+
+            // 4. Get wallet information
             const wallet = await this.listWalletRepository.findOne({
                 where: { wallet_id: walletId }
             });
@@ -447,7 +452,7 @@ export class AirdropsService {
 
 
 
-            // 4. Check token X balance (using same logic as createPool)
+            // 5. Check token X balance (using same logic as createPool)
             const mintTokenAirdrop = this.configService.get<string>('MINT_TOKEN_AIRDROP');
             if (!mintTokenAirdrop) {
                 throw new HttpException('MINT_TOKEN_AIRDROP configuration does not exist', HttpStatus.INTERNAL_SERVER_ERROR);
@@ -468,7 +473,7 @@ export class AirdropsService {
 
 
 
-            // 5. Check SOL balance and transfer fee if needed
+            // 6. Check SOL balance and transfer fee if needed
             let solBalance = await this.solanaService.getBalance(wallet.wallet_solana_address);
             const minSolBalance = 0.001; // Tối thiểu 0.0003 SOL
             const transferAmount = 0.001; // Chuyển 0.0009 SOL
@@ -525,7 +530,7 @@ export class AirdropsService {
                 }
             }
 
-            // 6. Create join record with pending status
+            // 7. Create join record with pending status
             const currentDate = new Date();
             const stakeEndDate = new Date(currentDate.getTime() + (365 * 24 * 60 * 60 * 1000)); // +365 days
             

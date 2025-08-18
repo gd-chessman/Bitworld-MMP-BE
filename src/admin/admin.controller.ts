@@ -732,8 +732,22 @@ export class AdminController {
   }
 
   @Post('airdrop-withdraw')
+  @ApiOperation({ summary: 'Process airdrop withdrawals for rewards with status can_withdraw' })
+  @ApiResponse({ status: 200, description: 'Airdrop withdrawal process completed' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can process withdrawals' })
+  @ApiResponse({ status: 500, description: 'Server error during withdrawal process' })
   async airdropWithdraw(@Request() req) {
     return this.airdropAdminService.processAirdropWithdraw();
+  }
+
+
+
+  @Get('airdrop-withdraw/test-private-key')
+  @UseGuards(JwtAuthAdminGuard)
+  @ApiOperation({ summary: 'Test private key format for debugging' })
+  @ApiResponse({ status: 200, description: 'Private key format analysis completed' })
+  async testPrivateKeyFormat(@Request() req) {
+    return this.airdropAdminService.testPrivateKeyFormat();
   }
 
   @Get('get-top-round')

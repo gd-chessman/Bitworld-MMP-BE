@@ -1,6 +1,6 @@
 import { Injectable, Logger, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
+import { Repository, Like, MoreThan } from 'typeorm';
 import { AirdropListToken, AirdropListTokenStatus } from '../airdrops/entities/airdrop-list-token.entity';
 import { AirdropListPool, AirdropPoolStatus } from '../airdrops/entities/airdrop-list-pool.entity';
 import { AirdropPoolJoin, AirdropPoolJoinStatus } from '../airdrops/entities/airdrop-pool-join.entity';
@@ -24,6 +24,7 @@ import { AirdropCalculateDto } from './dto/airdrop-calculate.dto';
 import { UserAdmin, AdminRole } from './entities/user-admin.entity';
 import { RedisLockService } from '../common/services/redis-lock.service';
 import { GetAirdropRewardsDto } from './dto/get-airdrop-rewards.dto';
+import bs58 from 'bs58';
 
 @Injectable()
 export class AirdropAdminService {
@@ -593,9 +594,17 @@ export class AirdropAdminService {
       throw new ForbiddenException('Only highest admin role can calculate airdrop rewards');
     }
 
-    // Step 1: Check if there are any active airdrop tokens
+    // Step 1: Check if there are any active airdrop tokens or tokens with TYPE_2 rewards to calculate
     const activeTokens = await this.airdropListTokenRepository.find({
-      where: { alt_status_1: AirdropListTokenStatus.ACTIVE }
+      where: [
+        { alt_status_1: AirdropListTokenStatus.ACTIVE },
+        // Also include tokens that have ended TYPE_1 but still have TYPE_2 rewards to calculate
+        {
+          alt_status_1: AirdropListTokenStatus.END,
+          alt_status_2: AirdropListTokenStatus.ACTIVE,
+          alt_amount_airdrop_2: MoreThan(0)
+        }
+      ]
     });
 
     if (activeTokens.length === 0) {
@@ -635,67 +644,91 @@ export class AirdropAdminService {
         total_reward_amount?: number;
       }> = [];
 
-      // Process each active token
-      for (const token of activeTokens) {
-        this.logger.log(`Processing token: ${token.alt_token_name} (ID: ${token.alt_id})`);
+              // Process each active token
+        for (const token of activeTokens) {
+          this.logger.log(`Processing token: ${token.alt_token_name} (ID: ${token.alt_id})`);
+          this.logger.log(`Token configuration: status_1=${token.alt_status_1}, status_2=${token.alt_status_2}, amount_1=${token.alt_amount_airdrop_1}, amount_2=${token.alt_amount_airdrop_2}`);
 
-        // Check if rewards already exist for this token (unless force recalculate)
+        // Check if TYPE_1 rewards already exist for this token (unless force recalculate)
+        let shouldSkipType1 = false;
         if (!airdropCalculateDto.forceRecalculate) {
-          const existingRewards = await this.airdropRewardRepository.findOne({
-            where: { ar_token_airdrop_id: token.alt_id }
+          const existingType1Rewards = await this.airdropRewardRepository.findOne({
+            where: { 
+              ar_token_airdrop_id: token.alt_id,
+              ar_type: AirdropRewardType.TYPE_1
+            }
           });
 
-          if (existingRewards) {
-            this.logger.log(`Rewards already exist for token ${token.alt_token_name}, skipping...`);
-            results.push({
-              token_id: token.alt_id,
-              token_name: token.alt_token_name,
-              status: 'skipped',
-              message: 'Rewards already exist for this token'
-            });
-            continue;
+          if (existingType1Rewards) {
+            this.logger.log(`TYPE_1 rewards already exist for token ${token.alt_token_name}, skipping TYPE_1 calculation...`);
+            shouldSkipType1 = true;
           }
         }
 
-        // Step 2: Calculate total volume across all ACTIVE pools (M)
-        const totalVolumeResult = await this.airdropListPoolRepository
-          .createQueryBuilder('pool')
-          .select('COALESCE(SUM(pool.apl_volume), 0)', 'totalPoolVolume')
-          .where('pool.apl_status = :status', { status: AirdropPoolStatus.ACTIVE })
-          .getRawOne();
+        // Check if TYPE_2 rewards already exist for this token
+        let shouldSkipType2 = false;
+        if (!airdropCalculateDto.forceRecalculate) {
+          const existingType2Rewards = await this.airdropRewardRepository.findOne({
+            where: { 
+              ar_token_airdrop_id: token.alt_id,
+              ar_type: AirdropRewardType.TYPE_2
+            }
+          });
 
-        const totalStakeResult = await this.airdropPoolJoinRepository
-          .createQueryBuilder('join')
-          .select('COALESCE(SUM(join.apj_volume), 0)', 'totalStakeVolume')
-          .where('join.apj_status = :status', { status: AirdropPoolJoinStatus.ACTIVE })
-          .getRawOne();
+          if (existingType2Rewards) {
+            this.logger.log(`TYPE_2 rewards already exist for token ${token.alt_token_name}, skipping TYPE_2 calculation...`);
+            shouldSkipType2 = true;
+          }
+        }
 
-        const totalVolume = parseFloat(totalVolumeResult?.totalPoolVolume || '0') + parseFloat(totalStakeResult?.totalStakeVolume || '0');
-
-        if (totalVolume === 0) {
-          this.logger.log(`No volume found for token ${token.alt_token_name}, skipping...`);
+        // If both types already exist, skip the token completely
+        if (shouldSkipType1 && shouldSkipType2) {
+          this.logger.log(`Both TYPE_1 and TYPE_2 rewards already exist for token ${token.alt_token_name}, skipping completely...`);
           results.push({
             token_id: token.alt_id,
             token_name: token.alt_token_name,
             status: 'skipped',
-            message: 'No volume found for this token'
+            message: 'Both TYPE_1 and TYPE_2 rewards already exist for this token'
           });
           continue;
         }
 
-        this.logger.log(`Total volume for token ${token.alt_token_name}: ${totalVolume}`);
 
-        // Step 3: Get all ACTIVE pools and their volumes
-        const pools = await this.airdropListPoolRepository
-          .createQueryBuilder('pool')
-          .leftJoinAndSelect('pool.poolJoins', 'joins')
-          .leftJoinAndSelect('pool.originator', 'originator')
-          .where('pool.apl_status = :status', { status: AirdropPoolStatus.ACTIVE })
-          .getMany();
 
-        this.logger.log(`Found ${pools.length} active pools to process`);
+        // Step 2: Calculate total volume across all ACTIVE pools (M)
+        // Only calculate volume-based rewards if TYPE_1 is still active and not already calculated
+        let totalVolume = 0;
+        let shouldCalculateType1 = token.alt_status_1 === AirdropListTokenStatus.ACTIVE && 
+                                  token.alt_amount_airdrop_1 > 0 && 
+                                  !shouldSkipType1;
+        
+        if (shouldCalculateType1) {
+          const totalVolumeResult = await this.airdropListPoolRepository
+            .createQueryBuilder('pool')
+            .select('COALESCE(SUM(pool.apl_volume), 0)', 'totalPoolVolume')
+            .where('pool.apl_status = :status', { status: AirdropPoolStatus.ACTIVE })
+            .getRawOne();
 
-        const rewardsToCreate: Array<{
+          const totalStakeResult = await this.airdropPoolJoinRepository
+            .createQueryBuilder('join')
+            .select('COALESCE(SUM(join.apj_volume), 0)', 'totalStakeVolume')
+            .where('join.apj_status = :status', { status: AirdropPoolJoinStatus.ACTIVE })
+            .getRawOne();
+
+          totalVolume = parseFloat(totalVolumeResult?.totalPoolVolume || '0') + parseFloat(totalStakeResult?.totalStakeVolume || '0');
+
+          if (totalVolume === 0) {
+            this.logger.log(`No volume found for token ${token.alt_token_name}, skipping TYPE_1 rewards...`);
+          } else {
+            this.logger.log(`Total volume for token ${token.alt_token_name}: ${totalVolume}`);
+          }
+        } else {
+          this.logger.log(`Token ${token.alt_token_name} TYPE_1 is not active or has no amount, skipping volume calculation`);
+        }
+
+        // Step 3: Get all ACTIVE pools and their volumes (only if calculating TYPE_1)
+        let pools: any[] = [];
+        let rewardsToCreate: Array<{
           ar_token_airdrop_id: number;
           ar_wallet_id: number;
           ar_wallet_address: string;
@@ -705,8 +738,17 @@ export class AirdropAdminService {
           ar_hash: string | null;
         }> = [];
 
-        for (const pool of pools) {
-          this.logger.log(`Processing pool ${pool.alp_id} (${pool.alp_name})`);
+        if (shouldCalculateType1 && totalVolume > 0) {
+          pools = await this.airdropListPoolRepository
+            .createQueryBuilder('pool')
+            .leftJoinAndSelect('pool.poolJoins', 'joins')
+            .leftJoinAndSelect('pool.originator', 'originator')
+            .where('pool.apl_status = :status', { status: AirdropPoolStatus.ACTIVE })
+            .getMany();
+
+                    this.logger.log(`Found ${pools.length} active pools to process for TYPE_1 rewards`);
+
+          for (const pool of pools) {
 
           // Calculate pool's total volume (initial + ACTIVE stakes) - X
           const poolStakeVolume = pool.poolJoins
@@ -724,8 +766,6 @@ export class AirdropAdminService {
           
           // Calculate pool's reward amount (Y = 100.000.000 x X/M %)
           const poolRewardAmount = token.alt_amount_airdrop_1 * poolPercentage;
-
-          this.logger.log(`Pool ${pool.alp_id} (${pool.alp_name}): volume=${poolTotalVolume}, percentage=${(poolPercentage * 100).toFixed(2)}%, reward=${poolRewardAmount}`);
 
           // Step 4: Calculate rewards for pool creator (10% of pool reward)
           const creatorReward = poolRewardAmount * 0.1; // 10% x Y
@@ -748,7 +788,7 @@ export class AirdropAdminService {
               total_volume: creatorTotalVolume
             });
 
-            this.logger.log(`Added creator ${pool.originator.wallet_id} with total volume: ${creatorTotalVolume} (initial: ${pool.apl_volume}, active stake: ${creatorStakeVolume})`);
+            this.logger.log(`Added creator ${pool.originator.wallet_id} with total volume: ${creatorTotalVolume}`);
           }
 
           // Add all ACTIVE stakers to participants
@@ -790,14 +830,12 @@ export class AirdropAdminService {
               const creatorRemainingReward = remainingReward * creatorSharePercentage;
               participantReward = creatorReward + creatorRemainingReward;
               
-              this.logger.log(`Creator ${walletId} reward: ${creatorReward} (10%) + ${creatorRemainingReward} (90% share) = ${participantReward}`);
-            } else {
-              // Stakers get their share of the remaining 90%
-              const stakerSharePercentage = participant.total_volume / poolTotalVolume;
-              participantReward = remainingReward * stakerSharePercentage;
-              
-              this.logger.log(`Staker ${walletId} reward: ${participantReward} (90% share based on volume ${participant.total_volume})`);
-            }
+                          this.logger.log(`Creator ${walletId} reward: ${creatorReward} (10%) + ${creatorRemainingReward} (90% share) = ${participantReward}`);
+          } else {
+            // Stakers get their share of the remaining 90%
+            const stakerSharePercentage = participant.total_volume / poolTotalVolume;
+            participantReward = remainingReward * stakerSharePercentage;
+          }
 
             if (participantReward > 0) {
               rewardsToCreate.push({
@@ -811,8 +849,6 @@ export class AirdropAdminService {
               });
 
               this.logger.log(`Created reward for wallet ${walletId}: ${participantReward} tokens`);
-            } else {
-              this.logger.warn(`No reward calculated for wallet ${walletId} in pool ${pool.alp_id}`);
             }
           }
 
@@ -830,24 +866,28 @@ export class AirdropAdminService {
             this.logger.warn(`Pool ${pool.alp_id} reward mismatch: calculated ${poolTotalReward} vs expected ${poolRewardAmount}`);
           }
         }
+        } // Close the for loop
 
-        // Step 6: Save all rewards to database
-        if (rewardsToCreate.length > 0) {
+        // Step 6: Save TYPE_1 rewards to database (only if calculated)
+        if (shouldCalculateType1 && rewardsToCreate.length > 0) {
           await this.airdropRewardRepository.save(rewardsToCreate);
-          this.logger.log(`Created ${rewardsToCreate.length} rewards for token ${token.alt_token_name}`);
-        } else {
-          this.logger.warn(`No rewards created for token ${token.alt_token_name}`);
+          this.logger.log(`Created ${rewardsToCreate.length} TYPE_1 rewards for token ${token.alt_token_name}`);
+        } else if (shouldCalculateType1) {
+          this.logger.warn(`No TYPE_1 rewards created for token ${token.alt_token_name}`);
         }
 
-        // Step 7: Update token status to 'end' after calculation (regardless of whether rewards were created)
-        await this.airdropListTokenRepository.update(
-          { alt_id: token.alt_id },
-          { alt_status_1: AirdropListTokenStatus.END }
-        );
-        this.logger.log(`Updated token ${token.alt_token_name} (ID: ${token.alt_id}) status to 'end'`);
+        // Step 7: Update token status_1 to 'end' only if TYPE_1 was calculated
+        if (shouldCalculateType1) {
+          await this.airdropListTokenRepository.update(
+            { alt_id: token.alt_id },
+            { alt_status_1: AirdropListTokenStatus.END }
+          );
+          this.logger.log(`Updated token ${token.alt_token_name} (ID: ${token.alt_id}) status_1 to 'end'`);
+        }
 
         // Step 8: Calculate and distribute alt_amount_airdrop_2 rewards for top pools
-        if (token.alt_amount_airdrop_2 && token.alt_amount_airdrop_2 > 0) {
+        // This will be calculated regardless of TYPE_1 status, but only if TYPE_2 not already calculated
+        if (token.alt_amount_airdrop_2 && token.alt_amount_airdrop_2 > 0 && !shouldSkipType2) {
           this.logger.log(`Processing alt_amount_airdrop_2: ${token.alt_amount_airdrop_2} for token ${token.alt_token_name}`);
           
           try {
@@ -873,23 +913,29 @@ export class AirdropAdminService {
                 { alt_status_2: AirdropListTokenStatus.END }
               );
               this.logger.log(`Updated token ${token.alt_token_name} (ID: ${token.alt_id}) status_2 to 'end'`);
+            } else {
+              this.logger.warn(`No TYPE_2 rewards created for token ${token.alt_token_name}, but alt_amount_airdrop_2 > 0`);
             }
           } catch (error) {
             this.logger.error(`Error calculating top pool rewards for token ${token.alt_token_name}:`, error);
             // Continue with the process even if top pool rewards fail
           }
+        } else if (shouldSkipType2) {
+          this.logger.log(`TYPE_2 rewards already exist for token ${token.alt_token_name}, skipping TYPE_2 calculation`);
         } else {
           this.logger.log(`No alt_amount_airdrop_2 for token ${token.alt_token_name}, skipping top pool rewards`);
         }
 
-        // Verify total calculation
-        const totalRewardDistributed = rewardsToCreate.reduce((sum, reward) => sum + reward.ar_amount, 0);
-        const expectedTotalReward = token.alt_amount_airdrop_1;
+        // Verify total TYPE_1 calculation (only if TYPE_1 was calculated)
+        if (shouldCalculateType1) {
+          const totalRewardDistributed = rewardsToCreate.reduce((sum, reward) => sum + reward.ar_amount, 0);
+          const expectedTotalReward = token.alt_amount_airdrop_1;
 
-        this.logger.log(`Token ${token.alt_token_name} total reward distributed: ${totalRewardDistributed} (expected: ${expectedTotalReward})`);
+          this.logger.log(`Token ${token.alt_token_name} total TYPE_1 reward distributed: ${totalRewardDistributed} (expected: ${expectedTotalReward})`);
 
-        if (Math.abs(totalRewardDistributed - expectedTotalReward) > 0.01) {
-          this.logger.warn(`Token ${token.alt_token_name} total reward mismatch: distributed ${totalRewardDistributed} vs expected ${expectedTotalReward}`);
+          if (Math.abs(totalRewardDistributed - expectedTotalReward) > 0.01) {
+            this.logger.warn(`Token ${token.alt_token_name} total TYPE_1 reward mismatch: distributed ${totalRewardDistributed} vs expected ${expectedTotalReward}`);
+          }
         }
 
         results.push({
@@ -897,8 +943,8 @@ export class AirdropAdminService {
           token_name: token.alt_token_name,
           status: 'completed',
           total_volume: totalVolume,
-          total_rewards_created: rewardsToCreate.length,
-          total_reward_amount: totalRewardDistributed
+          total_rewards_created: shouldCalculateType1 ? rewardsToCreate.length : 0,
+          total_reward_amount: shouldCalculateType1 ? rewardsToCreate.reduce((sum, reward) => sum + reward.ar_amount, 0) : 0
         });
       }
 
@@ -1205,6 +1251,8 @@ export class AirdropAdminService {
     }
   }
 
+
+
   /**
    * Process airdrop withdrawals for rewards with status 'withdraw'
    */
@@ -1337,58 +1385,234 @@ export class AirdropAdminService {
         throw new Error('WALLET_WITHDRAW_REWARD environment variable not configured');
       }
 
-      // Parse private key
-      let privateKey: string;
-      try {
-        const parsed = JSON.parse(withdrawWalletPrivateKey);
-        privateKey = parsed.solana || parsed.privateKey || withdrawWalletPrivateKey;
-      } catch {
-        privateKey = withdrawWalletPrivateKey;
-      }
+      this.logger.log(`Processing withdrawal with private key format check...`);
+      this.logger.log(`Private key length: ${withdrawWalletPrivateKey.length} characters`);
+      this.logger.log(`Private key starts with: ${withdrawWalletPrivateKey.substring(0, 10)}...`);
+      this.logger.log(`Private key ends with: ...${withdrawWalletPrivateKey.substring(withdrawWalletPrivateKey.length - 10)}`);
 
-      // Create keypair
-      const keypair = Keypair.fromSecretKey(
-        new Uint8Array(privateKey.split(',').map(Number))
-      );
+      // Parse private key with better error handling
+      let privateKey: string;
+      let keypair: Keypair;
+      
+      try {
+        // First try: JSON format
+        try {
+          const parsed = JSON.parse(withdrawWalletPrivateKey);
+          privateKey = parsed.solana || parsed.privateKey || withdrawWalletPrivateKey;
+          this.logger.log(`Extracted private key from JSON format`);
+        } catch {
+          privateKey = withdrawWalletPrivateKey;
+          this.logger.log(`Using private key as direct string (not JSON format)`);
+        }
+
+        // Validate private key length
+        if (!privateKey || privateKey.trim().length === 0) {
+          throw new Error('Private key is empty or whitespace only');
+        }
+
+        this.logger.log(`Attempting to parse private key with length: ${privateKey.length}`);
+
+        // Try different private key formats
+        try {
+          // Format 1: Base58 string (64 bytes when decoded)
+          const decodedKey = bs58.decode(privateKey);
+          if (decodedKey.length === 64) {
+            keypair = Keypair.fromSecretKey(decodedKey);
+            this.logger.log(`Successfully parsed private key as base58 (64 bytes)`);
+          } else {
+            throw new Error(`Invalid base58 key length: ${decodedKey.length} bytes`);
+          }
+        } catch (base58Error) {
+          // Format 2: Comma-separated numbers
+          try {
+            const numberArray = privateKey.split(',').map(Number);
+            if (numberArray.length === 64) {
+              keypair = Keypair.fromSecretKey(new Uint8Array(numberArray));
+              this.logger.log(`Successfully parsed private key as comma-separated numbers (64 elements)`);
+            } else {
+              throw new Error(`Invalid number array length: ${numberArray.length} elements`);
+            }
+          } catch (numberArrayError) {
+            // Format 3: Hex string
+            try {
+              if (privateKey.startsWith('0x')) {
+                privateKey = privateKey.slice(2);
+              }
+              if (privateKey.length === 128) { // 64 bytes = 128 hex chars
+                const hexArray = new Uint8Array(privateKey.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []);
+                if (hexArray.length === 64) {
+                  keypair = Keypair.fromSecretKey(hexArray);
+                  this.logger.log(`Successfully parsed private key as hex string (64 bytes)`);
+                } else {
+                  throw new Error(`Invalid hex array length: ${hexArray.length} bytes`);
+                }
+              } else {
+                throw new Error(`Invalid hex string length: ${privateKey.length} characters`);
+              }
+                         } catch (hexError) {
+               // Final fallback: try to create keypair directly
+               try {
+                 this.logger.log(`Attempting final fallback: direct keypair creation`);
+                 keypair = Keypair.fromSecretKey(new Uint8Array(64).fill(0)); // This will fail but give us better error
+                 throw new Error(`All parsing methods failed. Please check private key format.`);
+               } catch (finalError) {
+                 throw new Error(`Failed to parse private key. Tried base58, comma-separated, hex, and direct creation. Original error: ${base58Error.message}`);
+               }
+             }
+           }
+         }
+       } catch (parseError) {
+         this.logger.error(`Private key parsing failed: ${parseError.message}`);
+         this.logger.error(`Private key format (first 20 chars): ${withdrawWalletPrivateKey.substring(0, 20)}...`);
+         this.logger.error(`Private key format (last 20 chars): ...${withdrawWalletPrivateKey.substring(withdrawWalletPrivateKey.length - 20)}`);
+         this.logger.error(`Private key contains commas: ${withdrawWalletPrivateKey.includes(',')}`);
+         this.logger.error(`Private key contains spaces: ${withdrawWalletPrivateKey.includes(' ')}`);
+         throw new Error(`Invalid private key format: ${parseError.message}. Please check WALLET_WITHDRAW_REWARD environment variable.`);
+       }
 
       // Get Solana connection
       const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
 
       // Get token mint info and determine program type
       const mintPublicKey = new PublicKey(tokenMint);
+      this.logger.log(`Token mint public key: ${mintPublicKey.toString()}`);
+      
       const { tokenInfo, programType } = await this.getTokenInfoAndProgramType(mintPublicKey);
-
+      this.logger.log(`Token info: decimals=${tokenInfo.decimals}, symbol=${tokenInfo.symbol}, name=${tokenInfo.name}`);
       this.logger.log(`Processing withdrawal for token ${tokenMint} with program type: ${programType}`);
 
       // Calculate raw amount based on token decimals
       const rawAmount = amount * Math.pow(10, tokenInfo.decimals);
-
-      // Get or create ATA for recipient based on program type
-      const recipientATA = await this.getOrCreateATA(
-        mintPublicKey,
-        new PublicKey(recipientAddress),
-        connection,
-        programType
-      );
+      this.logger.log(`Amount calculation: ${amount} * 10^${tokenInfo.decimals} = ${rawAmount} (raw)`);
 
       // Get or create ATA for sender (withdraw wallet) based on program type
+      this.logger.log(`Getting/creating sender ATA for withdraw wallet: ${keypair.publicKey.toString()}`);
       const senderATA = await this.getOrCreateATA(
         mintPublicKey,
         keypair.publicKey,
         connection,
-        programType
+        programType,
+        keypair
       );
+      this.logger.log(`Sender ATA: ${senderATA.toString()}`);
+
+      // Get recipient ATA address (don't create if it doesn't exist)
+      const recipientATA = await getAssociatedTokenAddress(
+        mintPublicKey,
+        new PublicKey(recipientAddress),
+        false,
+        programType === 'spl-token-2022' ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
+      );
+      
+      this.logger.log(`Recipient ATA address: ${recipientATA.toString()}`);
+
+      // Check if recipient ATA exists, if not create it using withdraw wallet
+      this.logger.log(`Checking if recipient ATA exists...`);
+      const recipientAccountInfo = await connection.getAccountInfo(recipientATA);
+      if (!recipientAccountInfo) {
+        this.logger.log(`Recipient ATA does not exist, creating it using withdraw wallet...`);
+        
+        const createRecipientAtaInstruction = createAssociatedTokenAccountInstruction(
+          keypair.publicKey, // payer (withdraw wallet)
+          recipientATA,       // ATA address
+          new PublicKey(recipientAddress), // owner
+          mintPublicKey,      // mint
+          programType === 'spl-token-2022' ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID
+        );
+
+        const createAtaTransaction = new Transaction().add(createRecipientAtaInstruction);
+        createAtaTransaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+        createAtaTransaction.feePayer = keypair.publicKey;
+
+        const createAtaSignature = await connection.sendTransaction(createAtaTransaction, [keypair]);
+        await connection.confirmTransaction(createAtaSignature, 'confirmed');
+        
+        this.logger.log(`Created recipient ATA: ${recipientATA.toString()}`);
+        
+        // Wait for ATA to be fully initialized (Solana needs time to process)
+        this.logger.log(`Waiting for ATA to be fully initialized...`);
+        this.logger.log(`This is necessary because Solana needs time to process the ATA creation`);
+        await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
+        
+        // Verify ATA is properly initialized with retry
+        let verifyAtaInfo: any = null;
+        let verifyRetryCount = 0;
+        const maxVerifyRetries = 5;
+        
+        while (verifyRetryCount < maxVerifyRetries && !verifyAtaInfo) {
+          try {
+            verifyAtaInfo = await connection.getAccountInfo(recipientATA);
+                    if (verifyAtaInfo && verifyAtaInfo.data && verifyAtaInfo.data.length > 0) {
+          this.logger.log(`Verified recipient ATA is properly initialized with size: ${verifyAtaInfo.data.length} bytes`);
+          break;
+        } else if (verifyAtaInfo) {
+          this.logger.warn(`ATA exists but data length is ${verifyAtaInfo.data?.length || 0}, continuing verification...`);
+        }
+          } catch (error) {
+            this.logger.warn(`Verification attempt ${verifyRetryCount + 1} failed: ${error.message}`);
+          }
+          
+          verifyRetryCount++;
+          if (verifyRetryCount < maxVerifyRetries) {
+            this.logger.log(`Waiting additional 2 seconds before retry ${verifyRetryCount + 1}...`);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        }
+        
+        if (!verifyAtaInfo) {
+          throw new Error(`Failed to verify recipient ATA after ${maxVerifyRetries} attempts: ${recipientATA.toString()}`);
+        }
+      } else {
+        // ATA exists, verify it's properly initialized
+        this.logger.log(`Recipient ATA already exists: ${recipientATA.toString()}`);
+        
+        // Check if ATA is properly initialized (should have data)
+        if (recipientAccountInfo.data && recipientAccountInfo.data.length > 0) {
+          this.logger.log(`Recipient ATA is properly initialized with size: ${recipientAccountInfo.data.length} bytes`);
+        } else {
+          this.logger.warn(`Recipient ATA exists but has no data or empty data, this might cause transfer issues`);
+          this.logger.log(`ATA data length: ${recipientAccountInfo.data?.length || 0}`);
+        }
+      }
+      
+      // Additional verification: ensure both ATAs are ready for transfer
+      this.logger.log(`Final verification before transfer:`);
+      this.logger.log(`- Sender ATA: ${senderATA.toString()}`);
+      this.logger.log(`- Recipient ATA: ${recipientATA.toString()}`);
+      this.logger.log(`- Token mint: ${tokenMint}`);
+      this.logger.log(`- Amount to transfer: ${rawAmount} (raw), ${amount} (display)`);
+      
+      // Final check: ensure recipient ATA is ready for receiving tokens
+      const finalRecipientCheck = await connection.getAccountInfo(recipientATA);
+      if (!finalRecipientCheck || !finalRecipientCheck.data || finalRecipientCheck.data.length === 0) {
+        throw new Error(`Recipient ATA is not ready for transfer. Data length: ${finalRecipientCheck?.data?.length || 0}`);
+      }
+      
+      this.logger.log(`Recipient ATA is confirmed ready for transfer with data size: ${finalRecipientCheck.data.length} bytes`);
 
       // Check sender balance
       const senderBalance = await connection.getTokenAccountBalance(senderATA);
+      this.logger.log(`Sender ATA balance: ${senderBalance.value.amount} (raw), ${parseFloat(senderBalance.value.amount) / Math.pow(10, tokenInfo.decimals)} (display)`);
+      
       if (parseInt(senderBalance.value.amount) < rawAmount) {
-        throw new Error(`Insufficient balance. Required: ${rawAmount}, Available: ${senderBalance.value.amount}`);
+        throw new Error(`Insufficient token balance. Required: ${rawAmount}, Available: ${senderBalance.value.amount}`);
+      }
+
+      // Check if withdraw wallet has enough SOL for all operations (ATA creation + transfer)
+      const withdrawWalletBalance = await connection.getBalance(keypair.publicKey);
+      const estimatedTotalFee = 0.0025; // Estimated total fee: 0.002 for ATA + 0.0005 for transfer (in SOL)
+      
+      this.logger.log(`Withdraw wallet SOL balance: ${withdrawWalletBalance / 1e9} SOL, Required: ${estimatedTotalFee} SOL`);
+      
+      if (withdrawWalletBalance < estimatedTotalFee * 1e9) { // Convert to lamports
+        throw new Error(`Insufficient SOL balance for operations. Required: ${estimatedTotalFee} SOL, Available: ${withdrawWalletBalance / 1e9} SOL`);
       }
 
       // Create transfer instruction based on program type
       let transferInstruction;
       if (programType === 'spl-token-2022') {
         // Use SPL Token-2022 program
+        this.logger.log(`Creating SPL Token-2022 transfer instruction`);
         transferInstruction = createTransferInstruction(
           senderATA,
           recipientATA,
@@ -1399,6 +1623,7 @@ export class AirdropAdminService {
         );
       } else {
         // Use standard SPL Token program
+        this.logger.log(`Creating standard SPL Token transfer instruction`);
         transferInstruction = createTransferInstruction(
           senderATA,
           recipientATA,
@@ -1406,23 +1631,70 @@ export class AirdropAdminService {
           rawAmount
         );
       }
+      
+      this.logger.log(`Transfer instruction created successfully`);
 
       // Create transaction
       const transaction = new Transaction().add(transferInstruction);
       transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
       transaction.feePayer = keypair.publicKey;
+      
+      this.logger.log(`Transaction created with blockhash: ${transaction.recentBlockhash}`);
 
-      // Sign and send transaction
-      const signature = await connection.sendTransaction(transaction, [keypair]);
+      // Sign and send transaction with retry mechanism
+      let signature: string | undefined;
+      let confirmation: any;
+      let retryCount = 0;
+      const maxRetries = 3;
       
-      // Wait for confirmation
-      const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+      while (retryCount < maxRetries) {
+        try {
+          this.logger.log(`Attempting transfer transaction (attempt ${retryCount + 1}/${maxRetries})`);
+          
+          signature = await connection.sendTransaction(transaction, [keypair]);
+          
+          // Wait for confirmation
+          confirmation = await connection.confirmTransaction(signature, 'confirmed');
+          
+          if (confirmation.value.err) {
+            throw new Error(`Transaction failed: ${confirmation.value.err}`);
+          }
+          
+          this.logger.log(`Transfer transaction successful on attempt ${retryCount + 1}`);
+          break; // Success, exit retry loop
+          
+        } catch (error) {
+          retryCount++;
+          this.logger.warn(`Transfer attempt ${retryCount} failed: ${error.message}`);
+          
+          if (retryCount >= maxRetries) {
+            throw new Error(`Transfer failed after ${maxRetries} attempts. Last error: ${error.message}`);
+          }
+          
+                  // Wait before retry
+        const waitTime = 1000 * retryCount; // Exponential backoff
+        this.logger.log(`Waiting ${waitTime}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        
+        // Get new blockhash for retry
+        this.logger.log(`Getting new blockhash for retry...`);
+        transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+        this.logger.log(`New blockhash: ${transaction.recentBlockhash}`);
+        }
+      }
       
-      if (confirmation.value.err) {
-        throw new Error(`Transaction failed: ${confirmation.value.err}`);
+      // Ensure signature was obtained
+      if (!signature) {
+        throw new Error('Failed to obtain transaction signature after all retry attempts');
       }
 
       this.logger.log(`Withdrawal transaction successful: ${signature} for ${programType} token`);
+      this.logger.log(`Transaction details:`);
+      this.logger.log(`- Signature: ${signature}`);
+      this.logger.log(`- From: ${senderATA.toString()}`);
+      this.logger.log(`- To: ${recipientATA.toString()}`);
+      this.logger.log(`- Amount: ${rawAmount} (raw), ${amount} (display)`);
+      this.logger.log(`- Program: ${programType}`);
 
       return {
         success: true,
@@ -1531,7 +1803,8 @@ export class AirdropAdminService {
     mint: PublicKey,
     owner: PublicKey,
     connection: Connection,
-    programType: 'spl-token' | 'spl-token-2022' = 'spl-token'
+    programType: 'spl-token' | 'spl-token-2022' = 'spl-token',
+    keypair?: Keypair
   ): Promise<PublicKey> {
     try {
       // Determine program ID based on program type
@@ -1549,6 +1822,14 @@ export class AirdropAdminService {
       }
 
       // Create ATA if it doesn't exist
+      if (!keypair) {
+        throw new Error('Keypair is required to create ATA');
+      }
+
+      // Note: SOL balance check is already done in the main withdrawal function
+      // to avoid duplicate checks and optimize performance
+      // This function will only be called when we have a valid keypair
+
       const createAtaInstruction = createAssociatedTokenAccountInstruction(
         owner,
         ata,
@@ -1561,10 +1842,12 @@ export class AirdropAdminService {
       transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
       transaction.feePayer = owner;
 
-      const signature = await connection.sendTransaction(transaction, []);
+      // Use the provided keypair to sign the transaction
+      const signature = await connection.sendTransaction(transaction, [keypair]);
       await connection.confirmTransaction(signature, 'confirmed');
 
       this.logger.log(`Created new ATA: ${ata.toString()} for ${programType} program`);
+      this.logger.log(`ATA creation transaction signature: ${signature}`);
 
       return ata;
     } catch (error) {
@@ -1612,6 +1895,80 @@ export class AirdropAdminService {
     } catch (error) {
       this.logger.error(`Error creating airdrop_top_pools records: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Test private key format (for debugging)
+   */
+  public async testPrivateKeyFormat(): Promise<{ success: boolean; message: string; details?: any }> {
+    try {
+      const withdrawWalletPrivateKey = process.env.WALLET_WITHDRAW_REWARD;
+      if (!withdrawWalletPrivateKey) {
+        return { success: false, message: 'WALLET_WITHDRAW_REWARD environment variable not configured' };
+      }
+
+      const details = {
+        length: withdrawWalletPrivateKey.length,
+        startsWith: withdrawWalletPrivateKey.substring(0, 10),
+        endsWith: withdrawWalletPrivateKey.substring(withdrawWalletPrivateKey.length - 10),
+        containsCommas: withdrawWalletPrivateKey.includes(','),
+        containsBrackets: withdrawWalletPrivateKey.includes('[') || withdrawWalletPrivateKey.includes(']'),
+        containsQuotes: withdrawWalletPrivateKey.includes('"') || withdrawWalletPrivateKey.includes("'"),
+        isHex: /^[0-9a-fA-F]+$/.test(withdrawWalletPrivateKey),
+        isBase58: /^[1-9A-HJ-NP-Za-km-z]+$/.test(withdrawWalletPrivateKey)
+      };
+
+      // Try to parse
+      let parsedSuccessfully = false;
+      let parseMethod = '';
+
+      try {
+        // Try JSON first
+        const parsed = JSON.parse(withdrawWalletPrivateKey);
+        if (parsed.solana || parsed.privateKey) {
+          parsedSuccessfully = true;
+          parseMethod = 'JSON format';
+        }
+      } catch {}
+
+      if (!parsedSuccessfully) {
+        try {
+          // Try base58
+          const decoded = bs58.decode(withdrawWalletPrivateKey);
+          if (decoded.length === 64) {
+            parsedSuccessfully = true;
+            parseMethod = 'Base58 format';
+          }
+        } catch {}
+
+        if (!parsedSuccessfully) {
+          try {
+            // Try comma-separated
+            const numbers = withdrawWalletPrivateKey.split(',').map(Number);
+            if (numbers.length === 64 && !numbers.some(isNaN)) {
+              parsedSuccessfully = true;
+              parseMethod = 'Comma-separated numbers';
+            }
+          } catch {}
+        }
+      }
+
+      return {
+        success: true,
+        message: `Private key format analysis completed`,
+        details: {
+          ...details,
+          parsedSuccessfully,
+          parseMethod: parsedSuccessfully ? parseMethod : 'None'
+        }
+      };
+
+    } catch (error) {
+      return {
+        success: false,
+        message: `Error analyzing private key: ${error.message}`
+      };
     }
   }
 } 
