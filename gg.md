@@ -28,7 +28,7 @@ API `GET /airdrops/reward-history` cho phép người dùng xem lịch sử nh�
 - `to_date` (optional): Lọc đến ngày (ISO string)
 
 ### **Search:**
-- `search` (optional): Tìm kiếm theo tên token, token mint, email, hoặc bittworld_uid
+- `search` (optional): Tìm kiếm theo tên token hoặc token mint address
 
 ### **Sorting:**
 - `sort_by` (optional, default: `date`): Trường sắp xếp (`date`, `amount`, `type`, `status`)
@@ -162,37 +162,27 @@ GET /airdrops/reward-history?search=MMP
 GET /airdrops/reward-history?search=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
 ```
 
-### **Example 6: Search by email**
-```
-GET /airdrops/reward-history?search=user@example.com
-```
-
-### **Example 7: Search by bittworld_uid**
-```
-GET /airdrops/reward-history?search=BW123456789
-```
-
-### **Example 8: Filter by amount range**
+### **Example 6: Filter by amount range**
 ```
 GET /airdrops/reward-history?min_amount=1000000&max_amount=10000000
 ```
 
-### **Example 9: Filter by date range**
+### **Example 7: Filter by date range**
 ```
 GET /airdrops/reward-history?from_date=2024-01-01T00:00:00.000Z&to_date=2024-12-31T23:59:59.999Z
 ```
 
-### **Example 10: Sort by amount descending**
+### **Example 8: Sort by amount descending**
 ```
 GET /airdrops/reward-history?sort_by=amount&sort_order=desc
 ```
 
-### **Example 11: Pagination**
+### **Example 9: Pagination**
 ```
 GET /airdrops/reward-history?page=2&limit=10
 ```
 
-### **Example 12: Combined filters and search**
+### **Example 10: Combined filters and search**
 ```
 GET /airdrops/reward-history?type=1&sub_type=participation_share&status=can_withdraw&search=MMP&min_amount=1000000&sort_by=date&sort_order=desc&page=1&limit=20
 ```
@@ -200,12 +190,10 @@ GET /airdrops/reward-history?type=1&sub_type=participation_share&status=can_with
 ## 🔍 Search Functionality
 
 ### **Multi-field Search:**
-Parameter `search` hỗ trợ tìm kiếm theo 4 trường:
+Parameter `search` hỗ trợ tìm kiếm theo 2 trường:
 
 1. **Token Name** (`token.alt_token_name`)
-2. **Token Mint Address** (`token.alt_token_mint`) 
-3. **Email** (`userWallet.uw_email`)
-4. **Bittworld UID** (`rewardWallet.bittworld_uid`)
+2. **Token Mint Address** (`token.alt_token_mint`)
 
 ### **Search Logic:**
 - Sử dụng `ILIKE` (case-insensitive LIKE)
@@ -219,12 +207,6 @@ GET /airdrops/reward-history?search=MMP
 
 # Tìm theo token mint (partial)
 GET /airdrops/reward-history?search=EPjFWdd5
-
-# Tìm theo email
-GET /airdrops/reward-history?search=user@example
-
-# Tìm theo bittworld_uid
-GET /airdrops/reward-history?search=BW123
 ```
 
 ## 📊 Statistics Breakdown
@@ -314,7 +296,7 @@ Số lượng thưởng được format với:
 - Amount filters sử dụng số nguyên
 
 ### **2. Search Logic:**
-- Multi-field search với OR logic
+- Multi-field search với OR logic (token name + token mint)
 - Case-insensitive partial matching
 - Kết hợp với filters bằng AND logic
 

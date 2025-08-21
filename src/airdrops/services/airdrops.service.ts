@@ -2095,7 +2095,7 @@ export class AirdropsService {
 
             if (query.search) {
                 queryBuilder.andWhere(
-                    '(token.alt_token_name ILIKE :search OR token.alt_token_mint ILIKE :search OR userWallet.uw_email ILIKE :search OR rewardWallet.bittworld_uid ILIKE :search)',
+                    '(token.alt_token_name ILIKE :search OR token.alt_token_mint ILIKE :search)',
                     { search: `%${query.search}%` }
                 );
             }
@@ -2257,7 +2257,7 @@ export class AirdropsService {
 
             if (query.search) {
                 statsQueryBuilder.andWhere(
-                    '(token.alt_token_name ILIKE :search OR token.alt_token_mint ILIKE :search OR userWallet.uw_email ILIKE :search OR rewardWallet.bittworld_uid ILIKE :search)',
+                    '(token.alt_token_name ILIKE :search OR token.alt_token_mint ILIKE :search)',
                     { search: `%${query.search}%` }
                 );
             }

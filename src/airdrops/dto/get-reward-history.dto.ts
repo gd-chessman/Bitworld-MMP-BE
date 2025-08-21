@@ -85,7 +85,7 @@ export class GetRewardHistoryDto {
   token_id?: number;
 
   @ApiProperty({
-    description: 'Search by token name, token mint, email, or bittworld_uid',
+    description: 'Search by token name or token mint address',
     example: 'MMP',
     required: false
   })
