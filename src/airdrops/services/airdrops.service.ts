@@ -2068,6 +2068,8 @@ export class AirdropsService {
                 .createQueryBuilder('reward')
                 .leftJoin('reward.tokenAirdrop', 'token')
                 .leftJoin('reward.wallet', 'rewardWallet')
+                .leftJoin('rewardWallet.wallet_auths', 'walletAuth')
+                .leftJoin('walletAuth.wa_user', 'userWallet')
                 .where('reward.ar_wallet_id = :walletId', { walletId });
 
             // Apply filters
@@ -2091,10 +2093,11 @@ export class AirdropsService {
                 queryBuilder.andWhere('reward.ar_token_airdrop_id = :tokenId', { tokenId: query.token_id });
             }
 
-            if (query.search_token) {
-                queryBuilder.andWhere('token.alt_token_name ILIKE :searchToken', { 
-                    searchToken: `%${query.search_token}%` 
-                });
+            if (query.search) {
+                queryBuilder.andWhere(
+                    '(token.alt_token_name ILIKE :search OR token.alt_token_mint ILIKE :search OR userWallet.uw_email ILIKE :search OR rewardWallet.bittworld_uid ILIKE :search)',
+                    { search: `%${query.search}%` }
+                );
             }
 
             if (query.min_amount !== undefined) {
@@ -2144,7 +2147,7 @@ export class AirdropsService {
 
             queryBuilder.offset(offset).limit(limit);
 
-            // Select fields
+            // Select fields including wallet information
             queryBuilder.select([
                 'reward.ar_id',
                 'reward.ar_token_airdrop_id',
@@ -2157,7 +2160,9 @@ export class AirdropsService {
                 'reward.ar_hash',
                 'reward.ar_date',
                 'token.alt_token_name',
-                'token.alt_token_mint'
+                'token.alt_token_mint',
+                'rewardWallet.bittworld_uid',
+                'userWallet.uw_email'
             ]);
 
             // Execute query
@@ -2181,6 +2186,8 @@ export class AirdropsService {
                     ar_date: reward.reward_ar_date,
                     token_name: reward.token_alt_token_name,
                     token_mint: reward.token_alt_token_mint,
+                    bittworld_uid: reward.rewardWallet_bittworld_uid,
+                    email: reward.userWallet_uw_email,
                     pool_name: null, // TODO: Add pool information if needed
                     pool_slug: null, // TODO: Add pool information if needed
                     reward_description: rewardDescription,
@@ -2248,10 +2255,11 @@ export class AirdropsService {
                 statsQueryBuilder.andWhere('reward.ar_token_airdrop_id = :tokenId', { tokenId: query.token_id });
             }
 
-            if (query.search_token) {
-                statsQueryBuilder.andWhere('token.alt_token_name ILIKE :searchToken', { 
-                    searchToken: `%${query.search_token}%` 
-                });
+            if (query.search) {
+                statsQueryBuilder.andWhere(
+                    '(token.alt_token_name ILIKE :search OR token.alt_token_mint ILIKE :search OR userWallet.uw_email ILIKE :search OR rewardWallet.bittworld_uid ILIKE :search)',
+                    { search: `%${query.search}%` }
+                );
             }
 
             if (query.min_amount !== undefined) {

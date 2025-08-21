@@ -85,13 +85,13 @@ export class GetRewardHistoryDto {
   token_id?: number;
 
   @ApiProperty({
-    description: 'Search by token name',
-    example: 'MMP Token',
+    description: 'Search by token name, token mint, email, or bittworld_uid',
+    example: 'MMP',
     required: false
   })
   @IsOptional()
   @IsString()
-  search_token?: string;
+  search?: string;
 
   @ApiProperty({
     description: 'Filter by minimum amount',

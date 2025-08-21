@@ -39,6 +39,13 @@ export class RewardHistoryItemDto {
   @ApiProperty({ description: 'Token mint address' })
   token_mint: string;
 
+  // Wallet information
+  @ApiProperty({ description: 'Bittworld UID', nullable: true })
+  bittworld_uid: string | null;
+
+  @ApiProperty({ description: 'User email', nullable: true })
+  email: string | null;
+
   // Pool information (if available)
   @ApiProperty({ description: 'Pool name (if from pool)', nullable: true })
   pool_name?: string | null;
