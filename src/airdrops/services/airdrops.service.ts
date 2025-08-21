@@ -433,10 +433,6 @@ export class AirdropsService {
             const isCreator = pool.alp_originator === walletId;
 
             // 3. Validate minimum stake amount based on user role
-            if (!isCreator && stakePoolDto.stakeAmount < 1000000) {
-                throw new BadRequestException('Minimum stake amount is 1,000,000 BITT for non-creator users');
-            }
-
             if (isCreator && stakePoolDto.stakeAmount <= 0) {
                 throw new BadRequestException('Stake amount must be greater than 0 for pool creator');
             }
