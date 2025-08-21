@@ -1,7 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString, IsNumber, IsEnum } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { AirdropRewardStatus, AirdropRewardType } from '../../airdrops/entities/airdrop-reward.entity';
+import { AirdropRewardStatus, AirdropRewardType, AirdropRewardSubType } from '../../airdrops/entities/airdrop-reward.entity';
 
 export class GetAirdropRewardsDto {
   @ApiPropertyOptional({ description: 'Page number', default: 1 })
@@ -43,6 +43,14 @@ export class GetAirdropRewardsDto {
   @IsOptional()
   @IsEnum(AirdropRewardType)
   type?: AirdropRewardType;
+
+  @ApiPropertyOptional({ 
+    description: 'Filter by reward sub type: leader_bonus (10% Leader), participation_share (90% tham gia), top_pool_reward (TOP Pool)', 
+    enum: AirdropRewardSubType 
+  })
+  @IsOptional()
+  @IsEnum(AirdropRewardSubType)
+  sub_type?: AirdropRewardSubType;
 
   @ApiPropertyOptional({ description: 'Search by wallet address or email' })
   @IsOptional()

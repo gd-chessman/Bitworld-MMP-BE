@@ -721,6 +721,7 @@ export class AdminController {
   @ApiQuery({ name: 'alt_id', required: false, type: Number, description: 'Filter by token ID' })
   @ApiQuery({ name: 'status', required: false, enum: ['can_withdraw', 'withdrawn'], description: 'Filter by reward status' })
   @ApiQuery({ name: 'type', required: false, enum: ['1', '2'], description: 'Filter by reward type: 1 = TYPE_1 (volume-based), 2 = TYPE_2 (top pool)' })
+  @ApiQuery({ name: 'sub_type', required: false, enum: ['leader_bonus', 'participation_share', 'top_pool_reward'], description: 'Filter by reward sub type: leader_bonus (10% Leader), participation_share (90% tham gia), top_pool_reward (TOP Pool)' })
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Search by wallet address or email' })
   async getAirdropRewards(@Query() getAirdropRewardsDto: GetAirdropRewardsDto): Promise<AirdropRewardsListResponseDto> {
     return this.airdropAdminService.getAirdropRewards(getAirdropRewardsDto);

@@ -313,7 +313,7 @@ export class AirdropAdminService {
   }
 
   async getAirdropRewards(getAirdropRewardsDto: GetAirdropRewardsDto) {
-    const { page = 1, limit = 20, token_mint, alt_id, status = AirdropRewardStatus.CAN_WITHDRAW, search, type } = getAirdropRewardsDto;
+    const { page = 1, limit = 20, token_mint, alt_id, status = AirdropRewardStatus.CAN_WITHDRAW, search, type, sub_type } = getAirdropRewardsDto;
 
     const offset = (page - 1) * limit;
 
@@ -354,6 +354,10 @@ export class AirdropAdminService {
 
     if (type) {
       queryBuilder.andWhere('reward.ar_type = :type', { type });
+    }
+
+    if (sub_type) {
+      queryBuilder.andWhere('reward.ar_sub_type = :sub_type', { sub_type });
     }
 
     if (search) {
