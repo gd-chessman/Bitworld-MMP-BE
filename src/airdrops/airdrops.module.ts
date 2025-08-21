@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { AirdropListPool } from './entities/airdrop-list-pool.entity';
 import { AirdropPoolJoin } from './entities/airdrop-pool-join.entity';
+import { AirdropReward } from './entities/airdrop-reward.entity';
 
 import { ListWallet } from '../telegram-wallets/entities/list-wallet.entity';
 import { AirdropsController } from './controllers/airdrops.controller';
@@ -17,7 +18,7 @@ import { CloudinaryModule } from '../common/cloudinary/cloudinary.module';
     TypeOrmModule.forFeature([
       AirdropListPool,
       AirdropPoolJoin,
-
+      AirdropReward,
       ListWallet
     ]),
     ConfigModule,

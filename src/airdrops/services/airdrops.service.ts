@@ -4,6 +4,7 @@ import { Repository, In } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { AirdropListPool, AirdropPoolStatus } from '../entities/airdrop-list-pool.entity';
 import { AirdropPoolJoin, AirdropPoolJoinStatus } from '../entities/airdrop-pool-join.entity';
+import { AirdropReward, AirdropRewardType, AirdropRewardSubType, AirdropRewardStatus } from '../entities/airdrop-reward.entity';
 
 import { ListWallet } from '../../telegram-wallets/entities/list-wallet.entity';
 import { CreatePoolDto } from '../dto/create-pool.dto';
@@ -23,6 +24,7 @@ import bs58 from 'bs58';
 import { RedisLockService } from '../../common/services/redis-lock.service';
 import { CloudinaryService } from '../../common/cloudinary/cloudinary.service';
 import { UpdatePoolDto } from '../dto/update-pool.dto';
+import { GetRewardHistoryDto, RewardHistorySortField, RewardHistorySortOrder } from '../dto/get-reward-history.dto';
 
 @Injectable()
 export class AirdropsService {
@@ -35,6 +37,8 @@ export class AirdropsService {
         private readonly airdropListPoolRepository: Repository<AirdropListPool>,
         @InjectRepository(AirdropPoolJoin)
         private readonly airdropPoolJoinRepository: Repository<AirdropPoolJoin>,
+        @InjectRepository(AirdropReward)
+        private readonly airdropRewardRepository: Repository<AirdropReward>,
         
         @InjectRepository(ListWallet)
         private readonly listWalletRepository: Repository<ListWallet>,
@@ -2042,5 +2046,366 @@ export class AirdropsService {
     /**
      * Set top round configuration for airdrop rewards
      */
+
+    /**
+     * Get user's airdrop reward history with filtering and search
+     */
+    async getUserRewardHistory(walletId: number, query: GetRewardHistoryDto) {
+        try {
+            this.logger.log(`Getting reward history for wallet ${walletId} with filters: ${JSON.stringify(query)}`);
+
+            // Validate wallet exists
+            const wallet = await this.listWalletRepository.findOne({
+                where: { wallet_id: walletId }
+            });
+
+            if (!wallet) {
+                throw new BadRequestException('Wallet not found');
+            }
+
+            // Build query with proper joins
+            const queryBuilder = this.airdropRewardRepository
+                .createQueryBuilder('reward')
+                .leftJoin('reward.tokenAirdrop', 'token')
+                .leftJoin('reward.wallet', 'rewardWallet')
+                .where('reward.ar_wallet_id = :walletId', { walletId });
+
+            // Apply filters
+            if (query.type) {
+                queryBuilder.andWhere('reward.ar_type = :type', { type: query.type });
+            }
+
+            if (query.sub_type) {
+                queryBuilder.andWhere('reward.ar_sub_type = :subType', { subType: query.sub_type });
+            }
+
+            if (query.status) {
+                queryBuilder.andWhere('reward.ar_status = :status', { status: query.status });
+            }
+
+            if (query.token_mint) {
+                queryBuilder.andWhere('token.alt_token_mint = :tokenMint', { tokenMint: query.token_mint });
+            }
+
+            if (query.token_id) {
+                queryBuilder.andWhere('reward.ar_token_airdrop_id = :tokenId', { tokenId: query.token_id });
+            }
+
+            if (query.search_token) {
+                queryBuilder.andWhere('token.alt_token_name ILIKE :searchToken', { 
+                    searchToken: `%${query.search_token}%` 
+                });
+            }
+
+            if (query.min_amount !== undefined) {
+                queryBuilder.andWhere('reward.ar_amount >= :minAmount', { minAmount: query.min_amount });
+            }
+
+            if (query.max_amount !== undefined) {
+                queryBuilder.andWhere('reward.ar_amount <= :maxAmount', { maxAmount: query.max_amount });
+            }
+
+            if (query.from_date) {
+                queryBuilder.andWhere('reward.ar_date >= :fromDate', { fromDate: new Date(query.from_date) });
+            }
+
+            if (query.to_date) {
+                queryBuilder.andWhere('reward.ar_date <= :toDate', { toDate: new Date(query.to_date) });
+            }
+
+            // Get total count for pagination
+            const total = await queryBuilder.getCount();
+
+            // Apply sorting
+            const sortBy = query.sort_by || RewardHistorySortField.DATE;
+            const sortOrder = query.sort_order || RewardHistorySortOrder.DESC;
+
+            switch (sortBy) {
+                case RewardHistorySortField.DATE:
+                    queryBuilder.orderBy('reward.ar_date', sortOrder.toUpperCase() as 'ASC' | 'DESC');
+                    break;
+                case RewardHistorySortField.AMOUNT:
+                    queryBuilder.orderBy('reward.ar_amount', sortOrder.toUpperCase() as 'ASC' | 'DESC');
+                    break;
+                case RewardHistorySortField.TYPE:
+                    queryBuilder.orderBy('reward.ar_type', sortOrder.toUpperCase() as 'ASC' | 'DESC');
+                    break;
+                case RewardHistorySortField.STATUS:
+                    queryBuilder.orderBy('reward.ar_status', sortOrder.toUpperCase() as 'ASC' | 'DESC');
+                    break;
+                default:
+                    queryBuilder.orderBy('reward.ar_date', 'DESC');
+            }
+
+            // Apply pagination
+            const page = query.page || 1;
+            const limit = query.limit || 20;
+            const offset = (page - 1) * limit;
+
+            queryBuilder.offset(offset).limit(limit);
+
+            // Select fields
+            queryBuilder.select([
+                'reward.ar_id',
+                'reward.ar_token_airdrop_id',
+                'reward.ar_wallet_id',
+                'reward.ar_wallet_address',
+                'reward.ar_amount',
+                'reward.ar_type',
+                'reward.ar_sub_type',
+                'reward.ar_status',
+                'reward.ar_hash',
+                'reward.ar_date',
+                'token.alt_token_name',
+                'token.alt_token_mint'
+            ]);
+
+            // Execute query
+            const rawRewards = await queryBuilder.getRawMany();
+
+            // Transform results
+            const rewards = rawRewards.map(reward => {
+                const rewardDescription = this.getRewardDescription(reward.reward_ar_type, reward.reward_ar_sub_type);
+                const formattedAmount = this.formatRewardAmount(reward.reward_ar_amount, reward.token_alt_token_name);
+
+                return {
+                    ar_id: reward.reward_ar_id,
+                    ar_token_airdrop_id: reward.reward_ar_token_airdrop_id,
+                    ar_wallet_id: reward.reward_ar_wallet_id,
+                    ar_wallet_address: reward.reward_ar_wallet_address,
+                    ar_amount: reward.reward_ar_amount,
+                    ar_type: reward.reward_ar_type,
+                    ar_sub_type: reward.reward_ar_sub_type,
+                    ar_status: reward.reward_ar_status,
+                    ar_hash: reward.reward_ar_hash,
+                    ar_date: reward.reward_ar_date,
+                    token_name: reward.token_alt_token_name,
+                    token_mint: reward.token_alt_token_mint,
+                    pool_name: null, // TODO: Add pool information if needed
+                    pool_slug: null, // TODO: Add pool information if needed
+                    reward_description: rewardDescription,
+                    formatted_amount: formattedAmount
+                };
+            });
+
+            // Calculate statistics
+            const stats = await this.calculateRewardStats(walletId, query);
+
+            const totalPages = Math.ceil(total / limit);
+
+            this.logger.log(`Retrieved ${rewards.length} reward history items for wallet ${walletId} (page ${page}/${totalPages}, total: ${total})`);
+
+            return {
+                success: true,
+                message: 'Reward history retrieved successfully',
+                data: {
+                    rewards,
+                    stats,
+                    pagination: {
+                        page,
+                        limit,
+                        total,
+                        totalPages
+                    }
+                }
+            };
+
+        } catch (error) {
+            this.logger.error(`Error getting reward history for wallet ${walletId}: ${error.message}`);
+            throw error;
+        }
+    }
+
+    /**
+     * Calculate reward statistics for a wallet
+     */
+    private async calculateRewardStats(walletId: number, query: GetRewardHistoryDto) {
+        try {
+            // Build stats query with same filters as main query
+            const statsQueryBuilder = this.airdropRewardRepository
+                .createQueryBuilder('reward')
+                .leftJoin('reward.tokenAirdrop', 'token')
+                .where('reward.ar_wallet_id = :walletId', { walletId });
+
+            // Apply same filters as main query
+            if (query.type) {
+                statsQueryBuilder.andWhere('reward.ar_type = :type', { type: query.type });
+            }
+
+            if (query.sub_type) {
+                statsQueryBuilder.andWhere('reward.ar_sub_type = :subType', { subType: query.sub_type });
+            }
+
+            if (query.status) {
+                statsQueryBuilder.andWhere('reward.ar_status = :status', { status: query.status });
+            }
+
+            if (query.token_mint) {
+                statsQueryBuilder.andWhere('token.alt_token_mint = :tokenMint', { tokenMint: query.token_mint });
+            }
+
+            if (query.token_id) {
+                statsQueryBuilder.andWhere('reward.ar_token_airdrop_id = :tokenId', { tokenId: query.token_id });
+            }
+
+            if (query.search_token) {
+                statsQueryBuilder.andWhere('token.alt_token_name ILIKE :searchToken', { 
+                    searchToken: `%${query.search_token}%` 
+                });
+            }
+
+            if (query.min_amount !== undefined) {
+                statsQueryBuilder.andWhere('reward.ar_amount >= :minAmount', { minAmount: query.min_amount });
+            }
+
+            if (query.max_amount !== undefined) {
+                statsQueryBuilder.andWhere('reward.ar_amount <= :maxAmount', { maxAmount: query.max_amount });
+            }
+
+            if (query.from_date) {
+                statsQueryBuilder.andWhere('reward.ar_date >= :fromDate', { fromDate: new Date(query.from_date) });
+            }
+
+            if (query.to_date) {
+                statsQueryBuilder.andWhere('reward.ar_date <= :toDate', { toDate: new Date(query.to_date) });
+            }
+
+            // Get total stats
+            const totalStats = await statsQueryBuilder
+                .select([
+                    'COUNT(*) as total_rewards',
+                    'SUM(reward.ar_amount) as total_amount',
+                    'SUM(CASE WHEN reward.ar_status = :canWithdraw THEN reward.ar_amount ELSE 0 END) as total_can_withdraw_amount',
+                    'SUM(CASE WHEN reward.ar_status = :withdrawn THEN reward.ar_amount ELSE 0 END) as total_withdrawn_amount',
+                    'COUNT(CASE WHEN reward.ar_status = :canWithdraw THEN 1 END) as can_withdraw_count',
+                    'COUNT(CASE WHEN reward.ar_status = :withdrawn THEN 1 END) as withdrawn_count'
+                ])
+                .setParameter('canWithdraw', AirdropRewardStatus.CAN_WITHDRAW)
+                .setParameter('withdrawn', AirdropRewardStatus.WITHDRAWN)
+                .getRawOne();
+
+            // Get breakdown by type
+            const typeBreakdown = await statsQueryBuilder
+                .select([
+                    'reward.ar_type as type',
+                    'COUNT(*) as count',
+                    'SUM(reward.ar_amount) as total_amount'
+                ])
+                .groupBy('reward.ar_type')
+                .getRawMany();
+
+            // Get breakdown by sub_type
+            const subTypeBreakdown = await statsQueryBuilder
+                .select([
+                    'reward.ar_sub_type as sub_type',
+                    'COUNT(*) as count',
+                    'SUM(reward.ar_amount) as total_amount'
+                ])
+                .groupBy('reward.ar_sub_type')
+                .getRawMany();
+
+            // Get breakdown by token
+            const tokenBreakdown = await statsQueryBuilder
+                .select([
+                    'reward.ar_token_airdrop_id as token_id',
+                    'token.alt_token_name as token_name',
+                    'token.alt_token_mint as token_mint',
+                    'COUNT(*) as count',
+                    'SUM(reward.ar_amount) as total_amount'
+                ])
+                .groupBy('reward.ar_token_airdrop_id, token.alt_token_name, token.alt_token_mint')
+                .getRawMany();
+
+            // Format breakdown by type
+            const breakdownByType: any = {};
+            Object.values(AirdropRewardType).forEach(type => {
+                breakdownByType[type] = { count: 0, total_amount: 0 };
+            });
+            typeBreakdown.forEach(item => {
+                breakdownByType[item.type] = {
+                    count: parseInt(item.count),
+                    total_amount: parseFloat(item.total_amount || '0')
+                };
+            });
+
+            // Format breakdown by sub_type
+            const breakdownBySubType: any = {};
+            Object.values(AirdropRewardSubType).forEach(subType => {
+                breakdownBySubType[subType] = { count: 0, total_amount: 0 };
+            });
+            subTypeBreakdown.forEach(item => {
+                if (item.sub_type) {
+                    breakdownBySubType[item.sub_type] = {
+                        count: parseInt(item.count),
+                        total_amount: parseFloat(item.total_amount || '0')
+                    };
+                }
+            });
+
+            // Format breakdown by token
+            const breakdownByToken = tokenBreakdown.map(item => ({
+                token_id: parseInt(item.token_id),
+                token_name: item.token_name,
+                token_mint: item.token_mint,
+                count: parseInt(item.count),
+                total_amount: parseFloat(item.total_amount || '0')
+            }));
+
+            return {
+                total_rewards: parseInt(totalStats.total_rewards || '0'),
+                total_amount: parseFloat(totalStats.total_amount || '0'),
+                total_can_withdraw_amount: parseFloat(totalStats.total_can_withdraw_amount || '0'),
+                total_withdrawn_amount: parseFloat(totalStats.total_withdrawn_amount || '0'),
+                can_withdraw_count: parseInt(totalStats.can_withdraw_count || '0'),
+                withdrawn_count: parseInt(totalStats.withdrawn_count || '0'),
+                breakdown_by_type: breakdownByType,
+                breakdown_by_sub_type: breakdownBySubType,
+                breakdown_by_token: breakdownByToken
+            };
+
+        } catch (error) {
+            this.logger.error(`Error calculating reward stats for wallet ${walletId}: ${error.message}`);
+            throw error;
+        }
+    }
+
+    /**
+     * Get reward description based on type and sub_type
+     */
+    private getRewardDescription(type: AirdropRewardType, subType: AirdropRewardSubType | null): string {
+        switch (type) {
+            case AirdropRewardType.TYPE_1:
+                switch (subType) {
+                    case AirdropRewardSubType.LEADER_BONUS:
+                        return 'Leader Bonus (10%)';
+                    case AirdropRewardSubType.PARTICIPATION_SHARE:
+                        return 'Participation Share (90%)';
+                    default:
+                        return 'Volume-based Reward';
+                }
+            case AirdropRewardType.TYPE_2:
+                switch (subType) {
+                    case AirdropRewardSubType.TOP_POOL_REWARD:
+                        return 'TOP Pool Reward';
+                    default:
+                        return 'TOP Pool Reward';
+                }
+            default:
+                return 'Airdrop Reward';
+        }
+    }
+
+    /**
+     * Format reward amount with token symbol
+     */
+    private formatRewardAmount(amount: number, tokenName: string): string {
+        // Extract token symbol from token name (e.g., "MMP Token" -> "MMP")
+        const tokenSymbol = tokenName.split(' ')[0];
+        
+        // Format amount with commas
+        const formattedAmount = new Intl.NumberFormat('en-US').format(amount);
+        
+        return `${formattedAmount} ${tokenSymbol}`;
+    }
 
 } 

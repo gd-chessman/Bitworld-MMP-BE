@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, UseGuards, Request, HttpStatus, Param, Query, UseInterceptors, UploadedFile, Put } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards, Request, HttpStatus, Param, Query, UseInterceptors, UploadedFile, Put, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiConsumes } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
@@ -16,6 +16,8 @@ import { GetPoolDetailTransactionsResponseDto } from '../dto/get-pool-detail-tra
 import { GetPoolDetailTransactionsDto } from '../dto/get-pool-detail-transactions.dto';
 import { UpdatePoolDto } from '../dto/update-pool.dto';
 import { UpdatePoolResponseDto } from '../dto/update-pool-response.dto';
+import { GetRewardHistoryDto } from '../dto/get-reward-history.dto';
+import { GetRewardHistoryResponseDto } from '../dto/get-reward-history-response.dto';
 
 
 @ApiTags('Airdrops')
@@ -373,5 +375,19 @@ export class AirdropsController {
         };
     }
 
+    @Get('reward-history')
+    @UseGuards(AirdropJwtAuthGuard)
+    async getRewardHistory(
+        @Query() query: GetRewardHistoryDto,
+        @Request() req: any
+    ): Promise<GetRewardHistoryResponseDto> {
+        const walletId = req.user.wallet_id;
+        
+        if (!walletId) {
+            throw new BadRequestException('Wallet ID not found in token');
+        }
+
+        return await this.airdropsService.getUserRewardHistory(walletId, query);
+    }
 
 } 
