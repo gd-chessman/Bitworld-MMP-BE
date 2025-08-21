@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { AirdropRewardStatus, AirdropRewardType } from '../../airdrops/entities/airdrop-reward.entity';
+import { AirdropRewardStatus, AirdropRewardType, AirdropRewardSubType } from '../../airdrops/entities/airdrop-reward.entity';
 
 export class AirdropRewardResponseDto {
   @ApiProperty({ description: 'Reward ID' })
@@ -19,6 +19,9 @@ export class AirdropRewardResponseDto {
 
   @ApiProperty({ description: 'Reward type', enum: AirdropRewardType })
   ar_type: AirdropRewardType;
+
+  @ApiProperty({ description: 'Reward sub type (detailed classification)', enum: AirdropRewardSubType, nullable: true })
+  ar_sub_type: AirdropRewardSubType | null;
 
   @ApiProperty({ description: 'Reward status', enum: AirdropRewardStatus })
   ar_status: AirdropRewardStatus;

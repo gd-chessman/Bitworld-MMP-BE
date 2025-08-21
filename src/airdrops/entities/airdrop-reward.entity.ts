@@ -12,6 +12,12 @@ export enum AirdropRewardType {
   TYPE_2 = '2'
 }
 
+export enum AirdropRewardSubType {
+  LEADER_BONUS = 'leader_bonus',      // 10% thưởng Leader
+  PARTICIPATION_SHARE = 'participation_share',  // 90% thưởng tham gia
+  TOP_POOL_REWARD = 'top_pool_reward'  // Thưởng TOP Pool
+}
+
 @Entity('airdrop_rewards')
 export class AirdropReward {
   @PrimaryGeneratedColumn({ name: 'ar_id', type: 'integer' })
@@ -47,6 +53,14 @@ export class AirdropReward {
     default: AirdropRewardType.TYPE_1
   })
   ar_type: AirdropRewardType;
+
+  @Column({
+    name: 'ar_sub_type',
+    type: 'enum',
+    enum: AirdropRewardSubType,
+    nullable: true
+  })
+  ar_sub_type: AirdropRewardSubType | null;
 
   @Column({ name: 'ar_date', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   ar_date: Date;
