@@ -930,8 +930,6 @@ export class AirdropAdminService {
         // Step 8: Calculate and distribute alt_amount_airdrop_2 rewards for top pools
         // This will be calculated regardless of TYPE_1 status, but only if TYPE_2 not already calculated
         if (token.alt_amount_airdrop_2 && token.alt_amount_airdrop_2 > 0 && !shouldSkipType2) {
-          this.logger.log(`Processing alt_amount_airdrop_2: ${token.alt_amount_airdrop_2} for token ${token.alt_token_name}`);
-          
           try {
             const topPoolResult = await this.calculateTopPoolRewards(
               token.alt_id,
@@ -941,12 +939,12 @@ export class AirdropAdminService {
             
             if (topPoolResult.rewards.length > 0) {
               await this.airdropRewardRepository.save(topPoolResult.rewards);
-              this.logger.log(`Created ${topPoolResult.rewards.length} top pool rewards for token ${token.alt_token_name}`);
               
               // Store top pools data for later use
               if (!this.topPoolsDataForRound) {
                 this.topPoolsDataForRound = [];
               }
+              
               this.topPoolsDataForRound.push(...topPoolResult.topPoolsData);
               
               // Update token status_2 to 'end' after top pool rewards calculation
@@ -954,18 +952,11 @@ export class AirdropAdminService {
                 { alt_id: token.alt_id },
                 { alt_status_2: AirdropListTokenStatus.END }
               );
-              this.logger.log(`Updated token ${token.alt_token_name} (ID: ${token.alt_id}) status_2 to 'end'`);
-            } else {
-              this.logger.warn(`No TYPE_2 rewards created for token ${token.alt_token_name}, but alt_amount_airdrop_2 > 0`);
             }
           } catch (error) {
             this.logger.error(`Error calculating top pool rewards for token ${token.alt_token_name}:`, error);
             // Continue with the process even if top pool rewards fail
           }
-        } else if (shouldSkipType2) {
-          this.logger.log(`TYPE_2 rewards already exist for token ${token.alt_token_name}, skipping TYPE_2 calculation`);
-        } else {
-          this.logger.log(`No alt_amount_airdrop_2 for token ${token.alt_token_name}, skipping top pool rewards`);
         }
 
         // Verify total TYPE_1 calculation (only if TYPE_1 was calculated)
@@ -992,8 +983,6 @@ export class AirdropAdminService {
 
       // Step 9: Update active round status to 'end' and create airdrop_top_pools records
       if (roundProcessingResult.hasActiveRound && roundProcessingResult.activeRoundId) {
-        this.logger.log(`Updating active round ${roundProcessingResult.activeRoundId} status to 'end'`);
-        
         // Update round status to 'end'
         await this.airdropPoolRoundRepository.update(
           { apr_id: roundProcessingResult.activeRoundId },
@@ -1005,8 +994,6 @@ export class AirdropAdminService {
           roundProcessingResult.activeRoundId,
           activeTokens
         );
-        
-        this.logger.log(`Round ${roundProcessingResult.activeRoundId} processing completed and status updated to 'end'`);
       }
 
       this.logger.log(`Airdrop calculation completed by admin: ${currentUser.username}`);
@@ -1028,6 +1015,7 @@ export class AirdropAdminService {
 
   /**
    * Calculate and distribute rewards for top pools based on airdrop_top_round configuration
+   * MODIFIED: Now calculates directly from active pools, not dependent on airdrop_round_details
    */
   private async calculateTopPoolRewards(
     tokenId: number,
@@ -1046,52 +1034,74 @@ export class AirdropAdminService {
     }>;
   }> {
     try {
-      this.logger.log(`Starting top pool rewards calculation for token ${tokenId}, total amount: ${totalRewardAmount}`);
-
       // Step 1: Get top round configuration
       const topRoundConfig = await this.airdropTopRoundRepository.find({
         order: { atr_num_top: 'ASC' }
       });
 
       if (topRoundConfig.length === 0) {
-        this.logger.log('No top round configuration found, skipping top pool rewards');
         return { rewards: [], topPoolsData: [] };
       }
 
-      this.logger.log(`Found ${topRoundConfig.length} top round configurations: ${topRoundConfig.map(tr => `Top${tr.atr_num_top}:${tr.atr_percent}%`).join(', ')}`);
-
-      // Step 2: Get top pools from airdrop_round_details based on active round
-      let topPoolsQuery = this.airdropRoundDetailRepository
-        .createQueryBuilder('detail')
-        .leftJoinAndSelect('detail.pool', 'pool')
+      // Step 2: Get top pools directly from active pools
+      const topPoolsQuery = this.airdropListPoolRepository
+        .createQueryBuilder('pool')
+        .leftJoinAndSelect('pool.poolJoins', 'joins')
         .leftJoinAndSelect('pool.originator', 'originator')
         .select([
-          'detail.ard_pool_id',
-          'detail.ard_total_volume',
+          'pool.alp_id',
           'pool.alp_name',
+          'pool.apl_volume',
           'originator.wallet_id',
           'originator.wallet_solana_address'
         ])
-        .orderBy('detail.ard_total_volume', 'DESC')
-        .addOrderBy('detail.ard_pool_id', 'ASC') // If volume equal, sort by ID
-        .limit(topRoundConfig.length);
+        .addSelect('joins.apj_volume', 'stake_volume')
+        .addSelect('joins.apj_status', 'stake_status')
+        .where('pool.apl_status = :status', { status: AirdropPoolStatus.ACTIVE });
 
-      // If there's an active round, filter by it
-      if (activeRoundId) {
-        topPoolsQuery = topPoolsQuery.where('detail.ard_round_id = :roundId', { roundId: activeRoundId });
-        this.logger.log(`Filtering top pools by active round: ${activeRoundId}`);
-      } else {
-        this.logger.log('No active round specified, getting top pools from all rounds');
-      }
+      const poolsWithStakes = await topPoolsQuery.getRawMany();
 
-      const topPools = await topPoolsQuery.getRawMany();
-
-      if (topPools.length === 0) {
-        this.logger.log('No pools found for top rewards calculation');
+      if (poolsWithStakes.length === 0) {
         return { rewards: [], topPoolsData: [] };
       }
 
-      this.logger.log(`Found ${topPools.length} top pools: ${topPools.map(p => `Pool${p.detail_ard_pool_id}:${p.detail_ard_total_volume}`).join(', ')}`);
+      // Calculate total volume for each pool
+      const poolVolumes = new Map<number, {
+        pool_id: number;
+        pool_name: string;
+        total_volume: number;
+        originator_wallet_id: number;
+        originator_wallet_address: string;
+      }>();
+
+      for (const poolData of poolsWithStakes) {
+        const poolId = poolData.pool_alp_id;
+        
+        if (!poolVolumes.has(poolId)) {
+          poolVolumes.set(poolId, {
+            pool_id: poolId,
+            pool_name: poolData.pool_alp_name,
+            total_volume: parseFloat(poolData.pool_apl_volume || '0'),
+            originator_wallet_id: poolData.originator_wallet_id,
+            originator_wallet_address: poolData.originator_wallet_solana_address
+          });
+        }
+
+        // Add stake volume if stake is active
+        if (poolData.stake_status === AirdropPoolJoinStatus.ACTIVE) {
+          const currentPool = poolVolumes.get(poolId)!;
+          currentPool.total_volume += parseFloat(poolData.stake_volume || '0');
+        }
+      }
+
+      // Sort pools by total volume (descending) and get top pools
+      const sortedPools = Array.from(poolVolumes.values())
+        .sort((a, b) => b.total_volume - a.total_volume)
+        .slice(0, topRoundConfig.length);
+
+      if (sortedPools.length === 0) {
+        return { rewards: [], topPoolsData: [] };
+      }
 
       // Step 3: Calculate rewards for each top pool
       const rewards: AirdropReward[] = [];
@@ -1106,9 +1116,9 @@ export class AirdropAdminService {
       }> = [];
       let totalDistributedReward = 0;
 
-      for (let i = 0; i < Math.min(topRoundConfig.length, topPools.length); i++) {
+      for (let i = 0; i < Math.min(topRoundConfig.length, sortedPools.length); i++) {
         const config = topRoundConfig[i];
-        const pool = topPools[i];
+        const pool = sortedPools[i];
         
         // Calculate reward amount based on percentage
         const rewardAmount = (totalRewardAmount * config.atr_percent) / 100;
@@ -1118,7 +1128,7 @@ export class AirdropAdminService {
         const reward = this.airdropRewardRepository.create({
           ar_token_airdrop_id: tokenId,
           ar_wallet_id: pool.originator_wallet_id,
-          ar_wallet_address: pool.originator_wallet_solana_address,
+          ar_wallet_address: pool.originator_wallet_address,
           ar_amount: rewardAmount,
           ar_type: AirdropRewardType.TYPE_2,
           ar_sub_type: AirdropRewardSubType.TOP_POOL_REWARD,
@@ -1130,24 +1140,20 @@ export class AirdropAdminService {
 
         // Add to top pools data
         topPoolsData.push({
-          atp_pool_id: pool.detail_ard_pool_id,
+          atp_pool_id: pool.pool_id,
           atp_pool_round_id: activeRoundId || 0,
           atp_token_id: tokenId,
           atp_num_top: config.atr_num_top,
-          atp_total_volume: pool.detail_ard_total_volume,
+          atp_total_volume: pool.total_volume,
           atp_total_reward: rewardAmount,
           apt_percent_reward: config.atr_percent
         });
-
-        this.logger.log(`Top ${config.atr_num_top} - Pool ${pool.detail_ard_pool_id} (${pool.pool_alp_name}): volume=${pool.detail_ard_total_volume}, percentage=${config.atr_percent}%, reward=${rewardAmount}`);
       }
 
       // Verify total distributed reward
       if (Math.abs(totalDistributedReward - totalRewardAmount) > 0.01) {
         this.logger.warn(`Top pool rewards total mismatch: distributed ${totalDistributedReward} vs expected ${totalRewardAmount}`);
       }
-
-      this.logger.log(`Top pool rewards calculation completed: ${rewards.length} rewards created, total distributed: ${totalDistributedReward}`);
 
       return {
         rewards,
@@ -1907,15 +1913,12 @@ export class AirdropAdminService {
     activeTokens: AirdropListToken[]
   ): Promise<void> {
     try {
-      this.logger.log(`Creating airdrop_top_pools records for round ${roundId} with ${this.topPoolsDataForRound.length} top pools data`);
-
       if (this.topPoolsDataForRound.length === 0) {
-        this.logger.log('No top pools data to save, skipping airdrop_top_pools creation');
         return;
       }
 
       // Create AirdropTopPools entities
-      const topPoolsEntities = this.topPoolsDataForRound.map(data => {
+      const topPoolsEntities = this.topPoolsDataForRound.map((data) => {
         const entity = new AirdropTopPools();
         entity.atp_pool_id = data.atp_pool_id;
         entity.atp_pool_round_id = data.atp_pool_round_id;
@@ -1929,8 +1932,6 @@ export class AirdropAdminService {
 
       // Save to database
       await this.airdropTopPoolsRepository.save(topPoolsEntities);
-      
-      this.logger.log(`Successfully created ${topPoolsEntities.length} airdrop_top_pools records for round ${roundId}`);
 
       // Clear the data for next round
       this.topPoolsDataForRound = [];
