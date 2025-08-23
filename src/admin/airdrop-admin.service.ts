@@ -1,6 +1,6 @@
 import { Injectable, Logger, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, MoreThan } from 'typeorm';
+import { Repository, Like, MoreThan, In } from 'typeorm';
 import { AirdropListToken, AirdropListTokenStatus } from '../airdrops/entities/airdrop-list-token.entity';
 import { AirdropListPool, AirdropPoolStatus } from '../airdrops/entities/airdrop-list-pool.entity';
 import { AirdropPoolJoin, AirdropPoolJoinStatus } from '../airdrops/entities/airdrop-pool-join.entity';
@@ -2013,6 +2013,424 @@ export class AirdropAdminService {
         success: false,
         message: `Error analyzing private key: ${error.message}`
       };
+    }
+  }
+
+  /**
+   * Process airdrop withdrawals with batch optimization
+   * Groups rewards by token_mint and ar_sub_type to minimize transaction fees
+   */
+  async processAirdropWithdrawOptimized() {
+    try {
+      this.logger.log('Starting optimized airdrop withdrawal process');
+
+      // Get all rewards with status 'can_withdraw' 
+      const withdrawRewards = await this.airdropRewardRepository.find({
+        where: { ar_status: AirdropRewardStatus.CAN_WITHDRAW },
+        relations: ['tokenAirdrop', 'wallet']
+      });
+
+      if (withdrawRewards.length === 0) {
+        this.logger.log('No rewards found with status "can_withdraw"');
+        return {
+          success: true,
+          message: 'No rewards to withdraw',
+          processed: 0,
+          total: 0
+        };
+      }
+
+      this.logger.log(`Found ${withdrawRewards.length} rewards to withdraw`);
+
+      // Group rewards by token_mint and ar_sub_type for batch processing
+      const groupedRewards = this.groupRewardsByTokenAndSubType(withdrawRewards);
+      
+      this.logger.log(`Grouped into ${Object.keys(groupedRewards).length} batches for optimization`);
+
+      let successCount = 0;
+      let errorCount = 0;
+      const results: any[] = [];
+
+      // Process each batch
+      for (const [batchKey, rewards] of Object.entries(groupedRewards)) {
+        try {
+          this.logger.log(`Processing batch: ${batchKey} with ${rewards.length} rewards`);
+
+          const batchResult = await this.processBatchWithdrawal(rewards);
+          
+          if (batchResult.success) {
+            // Update all rewards in this batch
+            const rewardIds = rewards.map(r => r.ar_id);
+            await this.airdropRewardRepository.update(
+              { ar_id: In(rewardIds) },
+              {
+                ar_status: AirdropRewardStatus.WITHDRAWN,
+                ar_hash: batchResult.transactionHash
+              }
+            );
+
+            successCount += rewards.length;
+            results.push({
+              batch_key: batchKey,
+              status: 'success',
+              transaction_hash: batchResult.transactionHash,
+              rewards_count: rewards.length,
+              total_amount: batchResult.totalAmount,
+              fee_saved: batchResult.feeSaved
+            });
+
+            this.logger.log(`Successfully processed batch ${batchKey}: ${rewards.length} rewards, transaction: ${batchResult.transactionHash}`);
+          } else {
+            errorCount += rewards.length;
+            results.push({
+              batch_key: batchKey,
+              status: 'error',
+              error: batchResult.error,
+              rewards_count: rewards.length
+            });
+
+            this.logger.error(`Failed to process batch ${batchKey}: ${batchResult.error}`);
+          }
+
+        } catch (error) {
+          this.logger.error(`Error processing batch ${batchKey}: ${error.message}`);
+          errorCount += rewards.length;
+          results.push({
+            batch_key: batchKey,
+            status: 'error',
+            error: error.message,
+            rewards_count: rewards.length
+          });
+        }
+      }
+
+      this.logger.log(`Optimized airdrop withdrawal process completed. Success: ${successCount}, Errors: ${errorCount}`);
+
+      return {
+        success: true,
+        message: 'Optimized airdrop withdrawal process completed',
+        processed: withdrawRewards.length,
+        success_count: successCount,
+        error_count: errorCount,
+        batches_processed: Object.keys(groupedRewards).length,
+        results
+      };
+
+    } catch (error) {
+      this.logger.error(`Error in processAirdropWithdrawOptimized: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Group rewards by token_mint, wallet_address and ar_sub_type for batch processing
+   * This ensures each wallet receives separate transactions for different reward types
+   */
+  private groupRewardsByTokenAndSubType(rewards: AirdropReward[]): Record<string, AirdropReward[]> {
+    const grouped: Record<string, AirdropReward[]> = {};
+
+    for (const reward of rewards) {
+      // Get token mint address
+      const tokenMint = reward.tokenAirdrop?.alt_token_mint;
+      if (!tokenMint) {
+        this.logger.warn(`Reward ${reward.ar_id} has no token mint, skipping`);
+        continue;
+      }
+
+      // Create batch key: tokenMint_walletAddress_subType
+      // This groups rewards by token, wallet, and reward type
+      const batchKey = `${tokenMint}_${reward.ar_wallet_address}_${reward.ar_sub_type || 'unknown'}`;
+      
+      if (!grouped[batchKey]) {
+        grouped[batchKey] = [];
+      }
+      
+      grouped[batchKey].push(reward);
+    }
+
+    // Log grouping results with detailed breakdown
+    for (const [batchKey, batchRewards] of Object.entries(grouped)) {
+      const totalAmount = batchRewards.reduce((sum, r) => sum + parseFloat(r.ar_amount.toString()), 0);
+      const [tokenMint, walletAddress, subType] = batchKey.split('_');
+      this.logger.log(`Batch ${batchKey}: ${batchRewards.length} rewards, wallet: ${walletAddress}, sub_type: ${subType}, total amount: ${totalAmount}`);
+    }
+
+    return grouped;
+  }
+
+  /**
+   * Process batch withdrawal for rewards with same token, wallet and sub_type
+   */
+  private async processBatchWithdrawal(rewards: AirdropReward[]): Promise<{
+    success: boolean;
+    transactionHash?: string;
+    error?: string;
+    totalAmount?: number;
+    feeSaved?: number;
+  }> {
+    try {
+      if (rewards.length === 0) {
+        return { success: false, error: 'No rewards to process' };
+      }
+
+      // All rewards should have same token, wallet and sub_type
+      const firstReward = rewards[0];
+      const tokenMint = firstReward.tokenAirdrop?.alt_token_mint;
+      const walletAddress = firstReward.ar_wallet_address;
+      const subType = firstReward.ar_sub_type;
+
+      if (!tokenMint) {
+        return { success: false, error: 'Token mint not found' };
+      }
+
+      this.logger.log(`Processing batch withdrawal for token: ${tokenMint}, wallet: ${walletAddress}, sub_type: ${subType}, rewards: ${rewards.length}`);
+
+      // Since all rewards in this batch are for the same wallet and sub_type,
+      // we can simply sum up all amounts
+      const totalAmount = rewards.reduce((sum, reward) => sum + parseFloat(reward.ar_amount.toString()), 0);
+
+      // Calculate fee savings
+      const individualFee = 0.0005; // Estimated fee per individual transaction
+      const batchFee = 0.0005; // Single transaction fee for the batch
+      const feeSaved = (rewards.length * individualFee) - batchFee;
+
+      this.logger.log(`Total amount for wallet ${walletAddress}: ${totalAmount}, Fee saved: ${feeSaved} SOL`);
+
+      // Process single withdrawal to the wallet
+      const batchResult = await this.processBatchTransfer(
+        tokenMint,
+        [{ address: walletAddress, amount: totalAmount }]
+      );
+
+      if (batchResult.success) {
+        return {
+          success: true,
+          transactionHash: batchResult.transactionHash,
+          totalAmount,
+          feeSaved
+        };
+      } else {
+        return {
+          success: false,
+          error: batchResult.error,
+          totalAmount,
+          feeSaved
+        };
+      }
+
+    } catch (error) {
+      this.logger.error(`Error in processBatchWithdrawal: ${error.message}`);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Process batch transfer to recipients (now optimized for single recipient per batch)
+   */
+  private async processBatchTransfer(
+    tokenMint: string,
+    recipients: Array<{ address: string; amount: number }>
+  ): Promise<{ success: boolean; transactionHash?: string; error?: string }> {
+    try {
+      // Get withdraw wallet private key
+      const withdrawWalletPrivateKey = process.env.WALLET_WITHDRAW_REWARD;
+      if (!withdrawWalletPrivateKey) {
+        throw new Error('WALLET_WITHDRAW_REWARD environment variable not configured');
+      }
+
+      // Parse keypair (reuse existing logic)
+      const keypair = await this.parseKeypair(withdrawWalletPrivateKey);
+      
+      // Get Solana connection
+      const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com');
+
+      // Get token info and program type
+      const mintPublicKey = new PublicKey(tokenMint);
+      const { tokenInfo, programType } = await this.getTokenInfoAndProgramType(mintPublicKey);
+
+      // Get sender ATA
+      const senderATA = await this.getOrCreateATA(
+        mintPublicKey,
+        keypair.publicKey,
+        connection,
+        programType,
+        keypair
+      );
+
+      // Check sender balance
+      const senderBalance = await connection.getTokenAccountBalance(senderATA);
+      const totalRawAmount = recipients.reduce((sum, r) => sum + (r.amount * Math.pow(10, tokenInfo.decimals)), 0);
+      
+      if (parseInt(senderBalance.value.amount) < totalRawAmount) {
+        throw new Error(`Insufficient token balance. Required: ${totalRawAmount}, Available: ${senderBalance.value.amount}`);
+      }
+
+      // Check SOL balance for fees
+      const withdrawWalletBalance = await connection.getBalance(keypair.publicKey);
+      const estimatedFee = 0.0005 + (recipients.length * 0.0001); // Base fee + per recipient fee
+      
+      if (withdrawWalletBalance < estimatedFee * 1e9) {
+        throw new Error(`Insufficient SOL balance for batch transfer. Required: ${estimatedFee} SOL, Available: ${withdrawWalletBalance / 1e9} SOL`);
+      }
+
+      // Create transaction with multiple transfer instructions
+      const transaction = new Transaction();
+      const programId = programType === 'spl-token-2022' ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+
+      for (const recipient of recipients) {
+        const recipientATA = await getAssociatedTokenAddress(
+          mintPublicKey,
+          new PublicKey(recipient.address),
+          false,
+          programId
+        );
+
+        // Check if recipient ATA exists, create if needed
+        const recipientAccountInfo = await connection.getAccountInfo(recipientATA);
+        if (!recipientAccountInfo) {
+          const createAtaInstruction = createAssociatedTokenAccountInstruction(
+            keypair.publicKey,
+            recipientATA,
+            new PublicKey(recipient.address),
+            mintPublicKey,
+            programId
+          );
+          transaction.add(createAtaInstruction);
+        }
+
+        // Create transfer instruction
+        const rawAmount = recipient.amount * Math.pow(10, tokenInfo.decimals);
+        const transferInstruction = createTransferInstruction(
+          senderATA,
+          recipientATA,
+          keypair.publicKey,
+          rawAmount,
+          [],
+          programId
+        );
+        transaction.add(transferInstruction);
+      }
+
+      // Set transaction parameters
+      transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+      transaction.feePayer = keypair.publicKey;
+
+      // Send transaction with retry mechanism
+      let signature: string | undefined;
+      let retryCount = 0;
+      const maxRetries = 3;
+
+      while (retryCount < maxRetries) {
+        try {
+          this.logger.log(`Attempting batch transfer (attempt ${retryCount + 1}/${maxRetries})`);
+          
+          signature = await connection.sendTransaction(transaction, [keypair]);
+          const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+          
+          if (confirmation.value.err) {
+            throw new Error(`Transaction failed: ${confirmation.value.err}`);
+          }
+          
+          this.logger.log(`Batch transfer successful on attempt ${retryCount + 1}`);
+          break;
+          
+        } catch (error) {
+          retryCount++;
+          this.logger.warn(`Batch transfer attempt ${retryCount} failed: ${error.message}`);
+          
+          if (retryCount >= maxRetries) {
+            throw new Error(`Batch transfer failed after ${maxRetries} attempts. Last error: ${error.message}`);
+          }
+          
+          // Wait before retry and get new blockhash
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+          transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+        }
+      }
+
+      if (!signature) {
+        throw new Error('Failed to obtain transaction signature after all retry attempts');
+      }
+
+      this.logger.log(`Batch transfer successful: ${signature}`);
+      this.logger.log(`Transferred to ${recipients.length} recipients, total amount: ${recipients.reduce((sum, r) => sum + r.amount, 0)}`);
+
+      return {
+        success: true,
+        transactionHash: signature
+      };
+
+    } catch (error) {
+      this.logger.error(`Error in processBatchTransfer: ${error.message}`);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Parse keypair from private key (extracted from existing logic)
+   */
+  private async parseKeypair(privateKeyString: string): Promise<Keypair> {
+    let privateKey: string;
+    let keypair: Keypair;
+    
+    try {
+      // First try: JSON format
+      try {
+        const parsed = JSON.parse(privateKeyString);
+        privateKey = parsed.solana || parsed.privateKey || privateKeyString;
+      } catch {
+        privateKey = privateKeyString;
+      }
+
+      // Validate private key length
+      if (!privateKey || privateKey.trim().length === 0) {
+        throw new Error('Private key is empty or whitespace only');
+      }
+
+      // Try different private key formats
+      try {
+        // Format 1: Base58 string
+        const decodedKey = bs58.decode(privateKey);
+        if (decodedKey.length === 64) {
+          keypair = Keypair.fromSecretKey(decodedKey);
+          return keypair;
+        }
+      } catch {}
+
+      try {
+        // Format 2: Comma-separated numbers
+        const numberArray = privateKey.split(',').map(Number);
+        if (numberArray.length === 64) {
+          keypair = Keypair.fromSecretKey(new Uint8Array(numberArray));
+          return keypair;
+        }
+      } catch {}
+
+      try {
+        // Format 3: Hex string
+        let hexKey = privateKey;
+        if (hexKey.startsWith('0x')) {
+          hexKey = hexKey.slice(2);
+        }
+        if (hexKey.length === 128) {
+          const hexArray = new Uint8Array(hexKey.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []);
+          if (hexArray.length === 64) {
+            keypair = Keypair.fromSecretKey(hexArray);
+            return keypair;
+          }
+        }
+      } catch {}
+
+      throw new Error('Failed to parse private key in any supported format');
+
+    } catch (error) {
+      throw new Error(`Invalid private key format: ${error.message}`);
     }
   }
 } 
