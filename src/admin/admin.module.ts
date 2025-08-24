@@ -37,6 +37,7 @@ import { AirdropTopPools } from '../airdrops/entities/airdrop-top-pools.entity';
 import { BittworldsModule } from '../bittworlds/bittworlds.module';
 import { BittworldRewards } from '../bittworlds/entities/bittworld-rewards.entity';
 import { BittworldWithdraw } from '../bittworlds/entities/bittworld-withdraws.entity';
+import { BittworldToken } from '../bittworlds/entities/bittworld-token.entity';
 import { AirdropAdminService } from './airdrop-admin.service';
 import { SharedModule } from '../shared/shared.module';
 import { OnChainModule } from '../on-chain/on-chain.module';
@@ -69,6 +70,7 @@ import { ScheduledTasksService } from './scheduled-tasks.service';
       AirdropTopPools,
       BittworldRewards,
       BittworldWithdraw,
+      BittworldToken,
     ]),
     PassportModule.register({ defaultStrategy: 'admin-jwt' }),
     JwtModule.register({

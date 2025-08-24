@@ -36,6 +36,11 @@ import { GetAirdropRewardsDto } from './dto/get-airdrop-rewards.dto';
 import { AirdropRewardsListResponseDto } from './dto/airdrop-rewards-response.dto';
 import { ChangeBgAffiliateFlowDto, ChangeBgAffiliateFlowResponseDto } from './dto/change-bg-flow.dto';
 import { SendLeaderboardEmailResponseDto } from './dto/airdrop-staking-leaderboard.dto';
+import { CreateBittworldTokenDto } from './dto/create-bittworld-token.dto';
+import { CreateBittworldTokenResponseDto } from './dto/bittworld-token-response.dto';
+import { UpdateBittworldTokenDto } from './dto/update-bittworld-token.dto';
+import { UpdateBittworldTokenResponseDto } from './dto/update-bittworld-token-response.dto';
+import { DeleteBittworldTokenResponseDto } from './dto/delete-bittworld-token-response.dto';
 
 @ApiTags('admin')
 @Controller('admin')
@@ -804,6 +809,94 @@ export class AdminController {
   }
 
   // ==================== BITTWORLD MANAGEMENT ====================
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Post('bittworld-token')
+  @ApiOperation({ summary: 'Create new Bittworld token (Admin only)' })
+  @ApiResponse({ 
+    status: 201, 
+    description: 'Bittworld token created successfully', 
+    type: CreateBittworldTokenResponseDto 
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Invalid input data or validation failed' 
+  })
+  @ApiResponse({ 
+    status: 409, 
+    description: 'Token with this address already exists' 
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Unauthorized - Only admin can create tokens' 
+  })
+  async createBittworldToken(
+    @Body() createTokenDto: CreateBittworldTokenDto,
+    @Request() req: any
+  ): Promise<CreateBittworldTokenResponseDto> {
+    return await this.adminService.createBittworldToken(createTokenDto);
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Put('bittworld-token/:id')
+  @ApiOperation({ summary: 'Update existing Bittworld token (Admin only)' })
+  @ApiParam({
+    name: 'id',
+    description: 'ID của token cần cập nhật',
+    example: 1
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Bittworld token updated successfully', 
+    type: UpdateBittworldTokenResponseDto 
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Invalid input data or validation failed' 
+  })
+  @ApiResponse({ 
+    status: 404, 
+    description: 'Token not found' 
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Unauthorized - Only admin can update tokens' 
+  })
+  async updateBittworldToken(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() updateTokenDto: UpdateBittworldTokenDto,
+    @Request() req: any
+  ): Promise<UpdateBittworldTokenResponseDto> {
+    return await this.adminService.updateBittworldToken(id, updateTokenDto);
+  }
+
+  @UseGuards(JwtAuthAdminGuard)
+  @Delete('bittworld-token/:id')
+  @ApiOperation({ summary: 'Delete Bittworld token (Admin only)' })
+  @ApiParam({
+    name: 'id',
+    description: 'ID của token cần xóa',
+    example: 1
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Bittworld token deleted successfully', 
+    type: DeleteBittworldTokenResponseDto 
+  })
+  @ApiResponse({ 
+    status: 404, 
+    description: 'Token not found' 
+  })
+  @ApiResponse({ 
+    status: 401, 
+    description: 'Unauthorized - Only admin can delete tokens' 
+  })
+  async deleteBittworldToken(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req: any
+  ): Promise<DeleteBittworldTokenResponseDto> {
+    return await this.adminService.deleteBittworldToken(id);
+  }
 
   @UseGuards(JwtAuthAdminGuard)
   @Post('bittworld-withdraw')

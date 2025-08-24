@@ -34,9 +34,15 @@ import { AirdropStakingLeaderboardResponseDto } from './dto/airdrop-staking-lead
 import { BittworldsService } from '../bittworlds/services/bittworlds.service';
 import { BittworldRewards } from '../bittworlds/entities/bittworld-rewards.entity';
 import { BittworldWithdraw } from '../bittworlds/entities/bittworld-withdraws.entity';
+import { BittworldToken } from '../bittworlds/entities/bittworld-token.entity';
 import { SolanaTrackerService } from '../on-chain/solana-tracker.service';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import { CreateBittworldTokenDto } from './dto/create-bittworld-token.dto';
+import { BittworldTokenResponseDto, CreateBittworldTokenResponseDto } from './dto/bittworld-token-response.dto';
+import { UpdateBittworldTokenDto } from './dto/update-bittworld-token.dto';
+import { UpdateBittworldTokenResponseDto } from './dto/update-bittworld-token-response.dto';
+import { DeleteBittworldTokenResponseDto } from './dto/delete-bittworld-token-response.dto';
 
 @Injectable()
 export class AdminService implements OnModuleInit {
@@ -77,6 +83,8 @@ export class AdminService implements OnModuleInit {
     private bittworldRewardsRepository: Repository<BittworldRewards>,
     @InjectRepository(BittworldWithdraw)
     private bittworldWithdrawRepository: Repository<BittworldWithdraw>,
+    @InjectRepository(BittworldToken)
+    private bittworldTokenRepository: Repository<BittworldToken>,
     private readonly solanaTrackerService: SolanaTrackerService,
     private readonly configService: ConfigService,
   ) {
@@ -3914,6 +3922,184 @@ export class AdminService implements OnModuleInit {
     } catch (error) {
       this.logger.error(`Error getting scheduler status: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Tạo token mới trong bảng bittworld_token
+   * Kiểm tra chống trùng bt_address (bao gồm cả khoảng trắng)
+   */
+  async createBittworldToken(createTokenDto: CreateBittworldTokenDto): Promise<CreateBittworldTokenResponseDto> {
+    try {
+      // Kiểm tra chống trùng bt_address (loại bỏ khoảng trắng trước khi so sánh)
+      const normalizedAddress = createTokenDto.bt_address.trim();
+      
+      // Kiểm tra xem địa chỉ đã tồn tại chưa (có thể có khoảng trắng)
+      const existingToken = await this.bittworldTokenRepository
+        .createQueryBuilder('token')
+        .where('TRIM(token.bt_address) = :normalizedAddress', { normalizedAddress })
+        .getOne();
+
+      if (existingToken) {
+        throw new ConflictException(`Token with address "${createTokenDto.bt_address}" already exists`);
+      }
+
+      // Tạo token mới
+      const newToken = this.bittworldTokenRepository.create({
+        bt_name: createTokenDto.bt_name.trim(),
+        bt_symbol: createTokenDto.bt_symbol.trim(),
+        bt_address: normalizedAddress, // Lưu địa chỉ đã được trim
+        bt_logo_url: createTokenDto.bt_logo_url?.trim() || '',
+        bt_status: createTokenDto.bt_status !== undefined ? createTokenDto.bt_status : true
+      });
+
+      // Lưu token vào database
+      const savedToken = await this.bittworldTokenRepository.save(newToken);
+
+      // Trả về response
+      return {
+        status: 201,
+        message: 'Bittworld token created successfully',
+        data: {
+          bt_id: savedToken.bt_id,
+          bt_name: savedToken.bt_name,
+          bt_symbol: savedToken.bt_symbol,
+          bt_address: savedToken.bt_address,
+          bt_logo_url: savedToken.bt_logo_url,
+          bt_status: savedToken.bt_status,
+          created_at: savedToken.created_at,
+          updated_at: savedToken.updated_at
+        }
+      };
+
+    } catch (error) {
+      this.logger.error(`Error creating Bittworld token: ${error.message}`);
+      
+      if (error instanceof ConflictException) {
+        throw error;
+      }
+      
+      throw new BadRequestException(`Failed to create Bittworld token: ${error.message}`);
+    }
+  }
+
+  /**
+   * Cập nhật token trong bảng bittworld_token
+   * Không cho phép cập nhật bt_address
+   */
+  async updateBittworldToken(
+    tokenId: number, 
+    updateTokenDto: UpdateBittworldTokenDto
+  ): Promise<UpdateBittworldTokenResponseDto> {
+    try {
+      // Kiểm tra token có tồn tại không
+      const existingToken = await this.bittworldTokenRepository.findOne({
+        where: { bt_id: tokenId }
+      });
+
+      if (!existingToken) {
+        throw new NotFoundException(`Token with ID ${tokenId} not found`);
+      }
+
+      // Chuẩn bị dữ liệu cập nhật (chỉ các trường được cho phép)
+      const updateData: Partial<BittworldToken> = {};
+      
+      if (updateTokenDto.bt_name !== undefined) {
+        updateData.bt_name = updateTokenDto.bt_name.trim();
+      }
+      
+      if (updateTokenDto.bt_symbol !== undefined) {
+        updateData.bt_symbol = updateTokenDto.bt_symbol.trim();
+      }
+      
+      if (updateTokenDto.bt_logo_url !== undefined) {
+        updateData.bt_logo_url = updateTokenDto.bt_logo_url?.trim() || '';
+      }
+      
+      if (updateTokenDto.bt_status !== undefined) {
+        updateData.bt_status = updateTokenDto.bt_status;
+      }
+
+      // Cập nhật token
+      await this.bittworldTokenRepository.update(
+        { bt_id: tokenId },
+        updateData
+      );
+
+      // Lấy token đã cập nhật
+      const updatedToken = await this.bittworldTokenRepository.findOne({
+        where: { bt_id: tokenId }
+      });
+
+      if (!updatedToken) {
+        throw new NotFoundException(`Token with ID ${tokenId} not found after update`);
+      }
+
+      // Trả về response
+      return {
+        status: 200,
+        message: 'Bittworld token updated successfully',
+        data: {
+          bt_id: updatedToken.bt_id,
+          bt_name: updatedToken.bt_name,
+          bt_symbol: updatedToken.bt_symbol,
+          bt_address: updatedToken.bt_address,
+          bt_logo_url: updatedToken.bt_logo_url,
+          bt_status: updatedToken.bt_status,
+          updated_at: updatedToken.updated_at
+        }
+      };
+
+    } catch (error) {
+      this.logger.error(`Error updating Bittworld token ${tokenId}: ${error.message}`);
+      
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      
+      throw new BadRequestException(`Failed to update Bittworld token: ${error.message}`);
+    }
+  }
+
+  /**
+   * Xóa token trong bảng bittworld_token
+   */
+  async deleteBittworldToken(tokenId: number): Promise<DeleteBittworldTokenResponseDto> {
+    try {
+      // Kiểm tra token có tồn tại không
+      const existingToken = await this.bittworldTokenRepository.findOne({
+        where: { bt_id: tokenId }
+      });
+
+      if (!existingToken) {
+        throw new NotFoundException(`Token with ID ${tokenId} not found`);
+      }
+
+      // Lưu thông tin token trước khi xóa
+      const deletedTokenId = existingToken.bt_id;
+      const deletedAt = new Date();
+
+      // Xóa token
+      await this.bittworldTokenRepository.remove(existingToken);
+
+      // Trả về response
+      return {
+        status: 200,
+        message: 'Bittworld token deleted successfully',
+        data: {
+          deletedTokenId,
+          deletedAt
+        }
+      };
+
+    } catch (error) {
+      this.logger.error(`Error deleting Bittworld token ${tokenId}: ${error.message}`);
+      
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      
+      throw new BadRequestException(`Failed to delete Bittworld token: ${error.message}`);
     }
   }
 }
