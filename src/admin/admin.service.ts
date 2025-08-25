@@ -3279,15 +3279,15 @@ export class AdminService implements OnModuleInit {
         statusCounts[stat.status] = parseInt(stat.count);
       });
 
-      const overview = {
-        totalRewards: parseInt(totalStats.totalRewards) || 0,
-        totalAmountUSD: parseFloat(totalStats.totalAmountUSD) || 0,
-        totalAmountSOL: parseFloat(totalStats.totalAmountSOL) || 0,
-        pendingRewards: statusCounts.pending,
-        canWithdrawRewards: statusCounts.can_withdraw,
-        withdrawnRewards: statusCounts.withdrawn,
-        averageRewardPerTransaction: parseFloat(totalStats.averageRewardPerTransaction) || 0
-      };
+        const overview = {
+          totalRewards: parseInt(totalStats.totalrewards) || 0,
+          totalAmountUSD: parseFloat(totalStats.totalamountusd || '0') || 0,
+          totalAmountSOL: parseFloat(totalStats.totalamountsol || '0') || 0,
+          pendingRewards: statusCounts.pending,
+          canWithdrawRewards: statusCounts.can_withdraw,
+          withdrawnRewards: statusCounts.withdrawn,
+          averageRewardPerTransaction: parseFloat(totalStats.averagerewardpertransaction || '0') || 0
+        };
 
       return {
         overview
