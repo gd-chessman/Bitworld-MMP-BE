@@ -3206,6 +3206,28 @@ export class AdminService implements OnModuleInit {
     timestamp: string;
   }> {
     try {
+      // Kiểm tra quyền và điều kiện rút
+      const isHighestAdmin = currentUser.role === AdminRole.ADMIN;
+      const minWithdrawAmount = isHighestAdmin ? 0 : 5; // 5$ cho non-admin
+
+      // Kiểm tra tổng số tiền có thể rút trước khi xử lý
+      if (minWithdrawAmount > 0) {
+        const totalWithdrawableAmount = await this.bittworldRewardsRepository
+          .createQueryBuilder('reward')
+          .select('SUM(reward.br_amount_usd)', 'total')
+          .where('reward.br_status = :status', { status: 'can_withdraw' })
+          .getRawOne();
+
+        const totalAmount = parseFloat(totalWithdrawableAmount?.total || '0');
+        
+        if (totalAmount < minWithdrawAmount) {
+          return {
+            success: false,
+            message: 'Minimum $5 required',
+            timestamp: new Date().toISOString()
+          };
+        }
+      }
 
       // Gọi hàm trả hoa hồng Bittworld từ BittworldsService
       const result = await this.bittworldsService.manualAutoRewardBittworld();

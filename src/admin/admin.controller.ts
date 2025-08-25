@@ -932,14 +932,14 @@ export class AdminController {
   @ApiResponse({ status: 200, description: 'Bittworld reward withdrawal process completed' })
   @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can trigger withdrawal' })
   @ApiResponse({ status: 403, description: 'Forbidden - Only highest admin role can trigger withdrawal' })
-  async triggerBittworldWithdraw(@Request() req: any): Promise<{
-    success: boolean;
-    message: string;
-    processedRewards?: number;
-    totalAmount?: number;
-    timestamp: string;
-  }> {
-    return this.adminService.triggerBittworldWithdraw(req.user);
+  async triggerBittworldWithdraw(@Request() req: any, @Res() res: Response): Promise<void> {
+    const result = await this.adminService.triggerBittworldWithdraw(req.user);
+    
+    if (!result.success) {
+      res.status(400).json(result);
+    } else {
+      res.status(200).json(result);
+    }
   }
 
   @UseGuards(JwtAuthAdminGuard)
