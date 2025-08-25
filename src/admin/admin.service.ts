@@ -4102,4 +4102,100 @@ export class AdminService implements OnModuleInit {
       throw new BadRequestException(`Failed to delete Bittworld token: ${error.message}`);
     }
   }
+
+  /**
+   * Lấy danh sách Bittworld tokens với phân trang và tìm kiếm
+   */
+  async getBittworldTokens(
+    page: number = 1,
+    limit: number = 20,
+    search?: string,
+    status?: string
+  ): Promise<{
+    status: number;
+    message: string;
+    data: {
+      tokens: BittworldTokenResponseDto[];
+      pagination: {
+        page: number;
+        limit: number;
+        total: number;
+        totalPages: number;
+        hasNext: boolean;
+        hasPrev: boolean;
+      };
+    };
+  }> {
+    try {
+      // Validate pagination parameters
+      if (page < 1) page = 1;
+      if (limit < 1 || limit > 100) limit = 20;
+
+      // Build query
+      const queryBuilder = this.bittworldTokenRepository
+        .createQueryBuilder('token')
+        .orderBy('token.bt_id', 'DESC');
+
+      // Add search filter
+      if (search && search.trim()) {
+        const searchTerm = `%${search.trim()}%`;
+        queryBuilder.andWhere(
+          '(token.bt_name LIKE :search OR token.bt_symbol LIKE :search OR token.bt_address LIKE :search)',
+          { search: searchTerm }
+        );
+      }
+
+      // Add status filter
+      if (status !== undefined && status !== '') {
+        const statusValue = status.toLowerCase() === 'true';
+        queryBuilder.andWhere('token.bt_status = :status', { status: statusValue });
+      }
+
+      // Get total count
+      const total = await queryBuilder.getCount();
+
+      // Calculate pagination
+      const totalPages = Math.ceil(total / limit);
+      const offset = (page - 1) * limit;
+
+      // Get paginated results
+      const tokens = await queryBuilder
+        .skip(offset)
+        .take(limit)
+        .getMany();
+
+      // Transform to response format
+      const tokenResponses: BittworldTokenResponseDto[] = tokens.map(token => ({
+        bt_id: token.bt_id,
+        bt_name: token.bt_name,
+        bt_symbol: token.bt_symbol,
+        bt_address: token.bt_address,
+        bt_logo_url: token.bt_logo_url,
+        bt_status: token.bt_status,
+        created_at: token.created_at,
+        updated_at: token.updated_at
+      }));
+
+      // Return response
+      return {
+        status: 200,
+        message: 'Bittworld tokens retrieved successfully',
+        data: {
+          tokens: tokenResponses,
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages,
+            hasNext: page < totalPages,
+            hasPrev: page > 1
+          }
+        }
+      };
+
+    } catch (error) {
+      this.logger.error(`Error getting Bittworld tokens: ${error.message}`);
+      throw new BadRequestException(`Failed to get Bittworld tokens: ${error.message}`);
+    }
+  }
 }
