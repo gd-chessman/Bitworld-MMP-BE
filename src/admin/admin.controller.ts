@@ -737,7 +737,7 @@ export class AdminController {
     return this.airdropAdminService.setTopRound(setTopRoundDto);
   }
 
-  @Post('airdrop-withdraw-old')
+  @Post('airdrop-withdraw')
   @ApiOperation({ summary: 'Process airdrop withdrawals for rewards with status can_withdraw' })
   @ApiResponse({ status: 200, description: 'Airdrop withdrawal process completed' })
   @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can process withdrawals' })
@@ -746,7 +746,7 @@ export class AdminController {
     return this.airdropAdminService.processAirdropWithdraw();
   }
 
-  @Post('airdrop-withdraw')
+  @Post('airdrop-withdraw-new')
   @ApiOperation({ summary: 'Process airdrop withdrawals with batch optimization to minimize transaction fees' })
   @ApiResponse({ status: 200, description: 'Optimized airdrop withdrawal process completed' })
   @ApiResponse({ status: 401, description: 'Unauthorized - Only admin can process withdrawals' })
