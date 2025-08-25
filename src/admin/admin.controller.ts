@@ -844,6 +844,8 @@ export class AdminController {
   @ApiQuery({ name: 'limit', required: false, description: 'Items per page', example: 20 })
   @ApiQuery({ name: 'search', required: false, description: 'Search by name, symbol or address' })
   @ApiQuery({ name: 'status', required: false, description: 'Filter by status (true/false)' })
+  @ApiQuery({ name: 'sortBy', required: false, description: 'Sort by field (name, created_at)', example: 'name' })
+  @ApiQuery({ name: 'sortOrder', required: false, description: 'Sort order (ASC/DESC)', example: 'ASC' })
   @ApiResponse({ 
     status: 200, 
     description: 'Bittworld tokens retrieved successfully' 
@@ -856,9 +858,11 @@ export class AdminController {
     @Query('page', new ParseIntPipe({ optional: true })) page: number = 1,
     @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 20,
     @Query('search') search?: string,
-    @Query('status') status?: string
+    @Query('status') status?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string
   ) {
-    return await this.adminService.getBittworldTokens(page, limit, search, status);
+    return await this.adminService.getBittworldTokens(page, limit, search, status, sortBy, sortOrder);
   }
 
   @UseGuards(JwtAuthAdminGuard)

@@ -4110,7 +4110,9 @@ export class AdminService implements OnModuleInit {
     page: number = 1,
     limit: number = 20,
     search?: string,
-    status?: string
+    status?: string,
+    sortBy?: string,
+    sortOrder?: string
   ): Promise<{
     status: number;
     message: string;
@@ -4133,8 +4135,31 @@ export class AdminService implements OnModuleInit {
 
       // Build query
       const queryBuilder = this.bittworldTokenRepository
-        .createQueryBuilder('token')
-        .orderBy('token.bt_id', 'DESC');
+        .createQueryBuilder('token');
+
+      // Add sorting
+      const validSortFields = ['name', 'created_at'];
+      const validSortOrders = ['ASC', 'DESC'];
+      
+      let sortField = 'token.bt_id';
+      let sortDirection = 'DESC';
+      
+      if (sortBy && validSortFields.includes(sortBy)) {
+        switch (sortBy) {
+          case 'name':
+            sortField = 'token.bt_name';
+            break;
+          case 'created_at':
+            sortField = 'token.created_at';
+            break;
+        }
+      }
+      
+      if (sortOrder && validSortOrders.includes(sortOrder.toUpperCase())) {
+        sortDirection = sortOrder.toUpperCase();
+      }
+      
+      queryBuilder.orderBy(sortField, sortDirection as 'ASC' | 'DESC');
 
       // Add search filter
       if (search && search.trim()) {
