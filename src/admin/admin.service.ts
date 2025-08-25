@@ -3206,10 +3206,6 @@ export class AdminService implements OnModuleInit {
     timestamp: string;
   }> {
     try {
-      // Kiểm tra quyền - chỉ admin cao nhất mới được gọi
-      if (currentUser.role !== AdminRole.ADMIN) {
-        throw new ForbiddenException('Only admin with highest role can trigger Bittworld withdrawal');
-      }
 
       // Gọi hàm trả hoa hồng Bittworld từ BittworldsService
       const result = await this.bittworldsService.manualAutoRewardBittworld();
