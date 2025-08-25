@@ -20,7 +20,8 @@ export class CreatePoolResponseDto {
             name: 'My Airdrop Pool',
             slug: 'my-airdrop-pool-1',
             status: 'active',
-            initialAmount: 1000000
+            initialAmount: 1000000,
+            rewardCodeCreated: true
         }
     })
     data?: {
@@ -31,5 +32,6 @@ export class CreatePoolResponseDto {
         status: string;
         initialAmount: number;
         transactionHash?: string;
+        rewardCodeCreated?: boolean;
     };
 } 

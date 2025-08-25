@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { BittworldRewards } from './entities/bittworld-rewards.entity';
 import { BittworldWithdraw } from './entities/bittworld-withdraws.entity';
 import { BittworldToken } from './entities/bittworld-token.entity';
+import { BittworldRewardCode } from './entities/bittworld-reward-code.entity';
 import { BittworldsService } from './services/bittworlds.service';
 import { BittworldsController } from './controllers/bittworlds.controller';
 import { ListWallet } from '../telegram-wallets/entities/list-wallet.entity';
@@ -14,7 +15,7 @@ import { HttpModule } from '@nestjs/axios';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([BittworldRewards, BittworldWithdraw, BittworldToken, ListWallet, BgAffiliateTree]),
+        TypeOrmModule.forFeature([BittworldRewards, BittworldWithdraw, BittworldToken, BittworldRewardCode, ListWallet, BgAffiliateTree]),
         SolanaModule,
         ConfigModule,
         ScheduleModule,

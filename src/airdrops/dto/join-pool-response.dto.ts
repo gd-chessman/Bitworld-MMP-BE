@@ -21,7 +21,8 @@ export class StakePoolResponseDto {
             poolId: { type: 'number', example: 1 },
             stakeAmount: { type: 'number', example: 500000 },
             status: { type: 'string', example: 'active' },
-            transactionHash: { type: 'string', example: '5J7X...abc123' }
+            transactionHash: { type: 'string', example: '5J7X...abc123' },
+            rewardCodeCreated: { type: 'boolean', example: true }
         }
     })
     data: {
@@ -30,5 +31,6 @@ export class StakePoolResponseDto {
         stakeAmount: number;
         status: string;
         transactionHash: string | null;
+        rewardCodeCreated?: boolean;
     };
 } 

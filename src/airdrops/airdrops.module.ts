@@ -6,6 +6,7 @@ import { AirdropPoolJoin } from './entities/airdrop-pool-join.entity';
 import { AirdropReward } from './entities/airdrop-reward.entity';
 
 import { ListWallet } from '../telegram-wallets/entities/list-wallet.entity';
+import { BittworldRewardCode } from '../bittworlds/entities/bittworld-reward-code.entity';
 import { AirdropsController } from './controllers/airdrops.controller';
 import { AirdropsService } from './services/airdrops.service';
 import { AirdropJwtAuthGuard } from './guards/airdrop-jwt-auth.guard';
@@ -19,7 +20,8 @@ import { CloudinaryModule } from '../common/cloudinary/cloudinary.module';
       AirdropListPool,
       AirdropPoolJoin,
       AirdropReward,
-      ListWallet
+      ListWallet,
+      BittworldRewardCode
     ]),
     ConfigModule,
     SolanaModule,

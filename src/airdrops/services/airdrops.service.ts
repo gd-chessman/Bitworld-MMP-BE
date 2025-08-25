@@ -25,12 +25,14 @@ import { RedisLockService } from '../../common/services/redis-lock.service';
 import { CloudinaryService } from '../../common/cloudinary/cloudinary.service';
 import { UpdatePoolDto } from '../dto/update-pool.dto';
 import { GetRewardHistoryDto, RewardHistorySortField, RewardHistorySortOrder } from '../dto/get-reward-history.dto';
+import { BittworldRewardCode, RewardCodeType } from '../../bittworlds/entities/bittworld-reward-code.entity';
 
 @Injectable()
 export class AirdropsService {
     private readonly logger = new Logger(AirdropsService.name);
     private readonly MAX_RETRY_ATTEMPTS = 3;
     private readonly LOCK_TTL = 300; // 5 minutes
+    private readonly MIN_REWARD_AMOUNT = 1000000; // Minimum amount to get reward code (1,000,000 BITT)
 
     constructor(
         @InjectRepository(AirdropListPool)
@@ -42,6 +44,8 @@ export class AirdropsService {
         
         @InjectRepository(ListWallet)
         private readonly listWalletRepository: Repository<ListWallet>,
+        @InjectRepository(BittworldRewardCode)
+        private readonly bittworldRewardCodeRepository: Repository<BittworldRewardCode>,
         private readonly configService: ConfigService,
         private readonly solanaService: SolanaService,
         @Inject('SOLANA_CONNECTION')
@@ -76,7 +80,7 @@ export class AirdropsService {
         // Use withLock to automatically handle lock/release
         return await this.redisLockService.withLock(lockKey, async () => {
             // 1. Check minimum initial amount
-            if (createPoolDto.initialAmount < 1000000) {
+            if (createPoolDto.initialAmount < this.MIN_REWARD_AMOUNT) {
                 throw new BadRequestException('Initial amount must be at least 1,000,000');
             }
 
@@ -266,6 +270,17 @@ export class AirdropsService {
             // 11. Log final result
             if (success) {
                 this.logger.log(`Pool ${savedPool.alp_id} created successfully with transaction hash: ${transactionHash}`);
+                
+                // 12. Create reward code if pool creation is successful and amount is >= minimum reward amount
+                if (createPoolDto.initialAmount >= this.MIN_REWARD_AMOUNT) {
+                    try {
+                        await this.createRewardCodeForPoolCreation(walletId, savedPool.alp_id, createPoolDto.initialAmount);
+                        this.logger.log(`Reward code created for pool ${savedPool.alp_id} with amount ${createPoolDto.initialAmount}`);
+                    } catch (error) {
+                        this.logger.error(`Failed to create reward code for pool ${savedPool.alp_id}: ${error.message}`);
+                        // Don't fail the pool creation if reward code creation fails
+                    }
+                }
             } else {
                 this.logger.error(`Pool ${savedPool.alp_id} creation failed due to onchain transaction failure`);
             }
@@ -281,7 +296,8 @@ export class AirdropsService {
                         logo: logoUrl,
                         status: finalStatus,
                         initialAmount: createPoolDto.initialAmount,
-                        transactionHash: transactionHash
+                        transactionHash: transactionHash,
+                        rewardCodeCreated: createPoolDto.initialAmount >= this.MIN_REWARD_AMOUNT
                     }
                 };
             } else {
@@ -644,6 +660,17 @@ export class AirdropsService {
             if (success) {
                 this.logger.log(`✅ Join ${savedJoin.apj_id} created successfully with transaction hash: ${transactionHash}`);
                 this.logger.log(`📊 Pool ${stakePoolDto.poolId} updated: +${stakePoolDto.stakeAmount} tokens, member increment: ${existingJoin ? 0 : 1}`);
+                
+                // 11. Create reward code if stake amount is >= minimum reward amount
+                if (stakePoolDto.stakeAmount >= this.MIN_REWARD_AMOUNT) {
+                    try {
+                        await this.createRewardCodeForStake(walletId, stakePoolDto.poolId, stakePoolDto.stakeAmount);
+                        this.logger.log(`Reward code created for stake in pool ${stakePoolDto.poolId} with amount ${stakePoolDto.stakeAmount}`);
+                    } catch (error) {
+                        this.logger.error(`Failed to create reward code for stake in pool ${stakePoolDto.poolId}: ${error.message}`);
+                        // Don't fail the stake process if reward code creation fails
+                    }
+                }
             } else {
                 this.logger.error(`❌ Join ${savedJoin.apj_id} creation failed due to onchain transaction failure`);
                 this.logger.error(`🔍 Final transaction hash: ${transactionHash}`);
@@ -654,7 +681,8 @@ export class AirdropsService {
                 poolId: stakePoolDto.poolId,
                 stakeAmount: stakePoolDto.stakeAmount,
                 status: finalStatus,
-                transactionHash: transactionHash === 'already_processed' ? null : transactionHash
+                transactionHash: transactionHash === 'already_processed' ? null : transactionHash,
+                rewardCodeCreated: success && stakePoolDto.stakeAmount >= this.MIN_REWARD_AMOUNT
             };
 
             this.logger.log(`🎯 Stake pool response:`, responseData);
@@ -1615,7 +1643,7 @@ export class AirdropsService {
         }
     }
 
-    async checkWalletBalanceForStake(walletId: number, stakeAmount: number = 1000000) {
+    async checkWalletBalanceForStake(walletId: number, stakeAmount: number = this.MIN_REWARD_AMOUNT) {
         try {
             this.logger.log(`Checking wallet balance for stake: wallet ${walletId}, amount ${stakeAmount}`);
 
@@ -2414,6 +2442,104 @@ export class AirdropsService {
         const formattedAmount = new Intl.NumberFormat('en-US').format(amount);
         
         return `${formattedAmount} ${tokenSymbol}`;
+    }
+
+    /**
+     * Generate unique reward code
+     */
+    private generateRewardCode(): string {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        let result = '';
+        for (let i = 0; i < 8; i++) {
+            result += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return result;
+    }
+
+    /**
+     * Create reward code for pool creation
+     */
+    private async createRewardCodeForPoolCreation(walletId: number, poolId: number, volume: number): Promise<void> {
+        try {
+            // Generate unique code
+            let rewardCode = '';
+            let isUnique = false;
+            
+            while (!isUnique) {
+                rewardCode = this.generateRewardCode();
+                const existingCode = await this.bittworldRewardCodeRepository.findOne({
+                    where: { brc_code: rewardCode }
+                });
+                if (!existingCode) {
+                    isUnique = true;
+                }
+            }
+
+            // Set expiration date to 1 day from now
+            const expiredAt = new Date();
+            expiredAt.setDate(expiredAt.getDate() + 1);
+
+            // Create reward code
+            const newRewardCode = this.bittworldRewardCodeRepository.create({
+                brc_code: rewardCode,
+                brc_creator_wallet_id: walletId,
+                brc_claimer_wallet_id: null,
+                brc_pool_id: poolId,
+                brc_type: RewardCodeType.POOL_CREATION,
+                brc_volume: volume,
+                brc_is_used: false,
+                brc_expired_at: expiredAt
+            });
+
+            await this.bittworldRewardCodeRepository.save(newRewardCode);
+            this.logger.log(`Created reward code ${rewardCode} for pool ${poolId} with volume ${volume}`);
+        } catch (error) {
+            this.logger.error(`Error creating reward code for pool ${poolId}: ${error.message}`);
+            // Don't throw error to avoid affecting pool creation
+        }
+    }
+
+    /**
+     * Create reward code for stake
+     */
+    private async createRewardCodeForStake(walletId: number, poolId: number, volume: number): Promise<void> {
+        try {
+            // Generate unique code
+            let rewardCode = '';
+            let isUnique = false;
+            
+            while (!isUnique) {
+                rewardCode = this.generateRewardCode();
+                const existingCode = await this.bittworldRewardCodeRepository.findOne({
+                    where: { brc_code: rewardCode }
+                });
+                if (!existingCode) {
+                    isUnique = true;
+                }
+            }
+
+            // Set expiration date to 1 day from now
+            const expiredAt = new Date();
+            expiredAt.setDate(expiredAt.getDate() + 1);
+
+            // Create reward code
+            const newRewardCode = this.bittworldRewardCodeRepository.create({
+                brc_code: rewardCode,
+                brc_creator_wallet_id: walletId,
+                brc_claimer_wallet_id: null,
+                brc_pool_id: poolId,
+                brc_type: RewardCodeType.STAKE,
+                brc_volume: volume,
+                brc_is_used: false,
+                brc_expired_at: expiredAt
+            });
+
+            await this.bittworldRewardCodeRepository.save(newRewardCode);
+            this.logger.log(`Created reward code ${rewardCode} for stake in pool ${poolId} with volume ${volume}`);
+        } catch (error) {
+            this.logger.error(`Error creating reward code for stake in pool ${poolId}: ${error.message}`);
+            // Don't throw error to avoid affecting stake process
+        }
     }
 
 } 
