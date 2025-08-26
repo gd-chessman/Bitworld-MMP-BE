@@ -9,6 +9,7 @@ import { BittworldRewardCode } from './entities/bittworld-reward-code.entity';
 import { BittworldRewardWinner } from './entities/bittworld-reward-winner.entity';
 import { BittworldRewardItem } from './entities/bittworld-reward-item.entity';
 import { BittworldSpinHistory } from './entities/bittworld-spin-history.entity';
+import { BittworldSpinTicket } from './entities/bittworld-spin-ticket.entity';
 import { BittworldsService } from './services/bittworlds.service';
 import { BittworldsController } from './controllers/bittworlds.controller';
 import { BittworldLuckyController } from './controllers/bittworld-lucky.controller';
@@ -35,6 +36,7 @@ import { AuthModule } from '../auth/auth.module';
             BittworldRewardWinner,
             BittworldRewardItem,
             BittworldSpinHistory,
+            BittworldSpinTicket,
             ListWallet, 
             UserWallet,
             WalletAuth,

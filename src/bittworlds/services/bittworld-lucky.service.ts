@@ -1,13 +1,21 @@
 import { Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, MoreThan } from 'typeorm';
 import { Response } from 'express';
 import { UserWallet } from '../../telegram-wallets/entities/user-wallet.entity';
 import { ListWallet } from '../../telegram-wallets/entities/list-wallet.entity';
 import { WalletAuth } from '../../telegram-wallets/entities/wallet-auth.entity';
+import { BittworldRewardItem } from '../entities/bittworld-reward-item.entity';
+import { BittworldRewardCode } from '../entities/bittworld-reward-code.entity';
+import { BittworldRewardWinner } from '../entities/bittworld-reward-winner.entity';
+import { BittworldSpinHistory, SpinResultStatus } from '../entities/bittworld-spin-history.entity';
+import { BittworldRewardWinnerStatus } from '../entities/bittworld-reward-winner.entity';
+import { BittworldSpinTicket } from '../entities/bittworld-spin-ticket.entity';
 import { AuthService } from '../../auth/auth.service';
 import { LoginDto } from '../dto/login.dto';
 import { AuthResponseDto } from '../dto/auth-response.dto';
+import { SpinRewardDto, SpinRewardResponseDto } from '../dto/spin-reward.dto';
+import { EnterCodeDto, EnterCodeResponseDto } from '../dto/enter-code.dto';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -21,6 +29,16 @@ export class BittworldLuckyService {
         private readonly listWalletRepository: Repository<ListWallet>,
         @InjectRepository(WalletAuth)
         private readonly walletAuthRepository: Repository<WalletAuth>,
+        @InjectRepository(BittworldRewardItem)
+        private readonly rewardItemRepository: Repository<BittworldRewardItem>,
+        @InjectRepository(BittworldRewardCode)
+        private readonly rewardCodeRepository: Repository<BittworldRewardCode>,
+        @InjectRepository(BittworldRewardWinner)
+        private readonly rewardWinnerRepository: Repository<BittworldRewardWinner>,
+        @InjectRepository(BittworldSpinHistory)
+        private readonly spinHistoryRepository: Repository<BittworldSpinHistory>,
+        @InjectRepository(BittworldSpinTicket)
+        private readonly spinTicketRepository: Repository<BittworldSpinTicket>,
         private readonly authService: AuthService,
     ) {}
 
@@ -100,6 +118,198 @@ export class BittworldLuckyService {
 
         } catch (error) {
             this.logger.error(`Error in login: ${error.message}`, error.stack);
+            throw error;
+        }
+    }
+
+    async enterCode(dto: EnterCodeDto, walletId: number): Promise<EnterCodeResponseDto> {
+        try {
+            this.logger.log(`Processing enter code: ${dto.code} for wallet: ${walletId}`);
+
+            // 1. Kiểm tra mã dự thưởng có tồn tại và còn hạn không
+            const now = new Date();
+            const rewardCode = await this.rewardCodeRepository.findOne({
+                where: {
+                    brc_code: dto.code,
+                    brc_is_used: false,
+                    brc_expired_at: MoreThan(now)
+                }
+            });
+
+            if (!rewardCode) {
+                throw new NotFoundException('Invalid or expired reward code');
+            }
+
+            // 2. Kiểm tra mã đã được sử dụng bởi wallet này chưa
+            const existingTicket = await this.spinTicketRepository.findOne({
+                where: {
+                    bst_wallet_id: walletId,
+                    bst_code_id: rewardCode.brc_id
+                }
+            });
+
+            if (existingTicket) {
+                throw new BadRequestException('This code has already been used by your wallet');
+            }
+
+            // 3. Tạo spin ticket
+            const spinTicket = this.spinTicketRepository.create({
+                bst_wallet_id: walletId,
+                bst_code_id: rewardCode.brc_id,
+                bst_expired_at: rewardCode.brc_expired_at || new Date(Date.now() + 24 * 60 * 60 * 1000)
+            });
+            await this.spinTicketRepository.save(spinTicket);
+
+            // 4. Đánh dấu mã dự thưởng đã được sử dụng
+            rewardCode.brc_is_used = true;
+            rewardCode.brc_claimer_wallet_id = walletId;
+            await this.rewardCodeRepository.save(rewardCode);
+
+            this.logger.log(`Created spin ticket ${spinTicket.bst_id} for wallet ${walletId} and marked code ${dto.code} as used`);
+
+            return {
+                status: 200,
+                message: 'Reward code entered successfully! You can now spin for rewards.',
+                data: {
+                    ticket_id: spinTicket.bst_id,
+                    expires_at: spinTicket.bst_expired_at,
+                    code_info: {
+                        name: rewardCode.brc_code,
+                        type: rewardCode.brc_type,
+                        volume: rewardCode.brc_volume
+                    }
+                }
+            };
+
+        } catch (error) {
+            this.logger.error(`Error in enterCode: ${error.message}`, error.stack);
+            throw error;
+        }
+    }
+
+    async spinReward(walletId: number): Promise<SpinRewardResponseDto> {
+        try {
+            this.logger.log(`Processing spin reward for wallet: ${walletId}`);
+
+            // 1. Tìm spin ticket hợp lệ chưa sử dụng
+            const now = new Date();
+            const spinTicket = await this.spinTicketRepository.findOne({
+                where: {
+                    bst_wallet_id: walletId,
+                    bst_is_used: false,
+                    bst_expired_at: MoreThan(now)
+                }
+            });
+
+            if (!spinTicket) {
+                throw new NotFoundException('No available spin tickets found. Please enter a reward code first.');
+            }
+
+            // 2. Lấy danh sách phần thưởng đang active
+            const activeRewards = await this.rewardItemRepository.find({
+                where: { bri_active: true }
+            });
+
+            if (activeRewards.length === 0) {
+                throw new BadRequestException('No active rewards available');
+            }
+
+            // 3. Kiểm tra phần thưởng nào đã được trúng trong ngày hôm nay
+            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const todayWinners = await this.rewardWinnerRepository.find({
+                where: {
+                    brw_won_at: MoreThan(todayStart)
+                }
+            });
+
+            const wonItemIds = todayWinners.map(winner => winner.brw_code_id);
+            const availableRewards = activeRewards.filter(reward => !wonItemIds.includes(reward.bri_id));
+
+            // 4. Tính toán xác suất trúng thưởng
+            const baseWinRate = 0.2; // 20%
+            const availableCount = availableRewards.length;
+            
+            if (availableCount === 0) {
+                // Tất cả phần thưởng đã được trúng
+                const spinHistory = this.spinHistoryRepository.create({
+                    bsh_wallet_id: walletId,
+                    bsh_code_id: spinTicket.bst_code_id,
+                    bsh_status: SpinResultStatus.FAILED,
+                    bsh_reward_value_usd: 0
+                });
+                await this.spinHistoryRepository.save(spinHistory);
+
+                // Đánh dấu ticket đã sử dụng
+                spinTicket.bst_is_used = true;
+                await this.spinTicketRepository.save(spinTicket);
+
+                return {
+                    status: 200,
+                    message: 'All rewards have been claimed today. Better luck tomorrow!',
+                    data: {
+                        is_winner: false,
+                        spin_history_id: spinHistory.bsh_id
+                    }
+                };
+            }
+
+            // Tính xác suất trúng 1 phần thưởng bất kỳ
+            const winProbability = baseWinRate / availableCount;
+            const random = Math.random();
+
+            // 5. Thực hiện quay thưởng
+            let wonItem: BittworldRewardItem | null = null;
+            let isWinner = false;
+
+            if (random <= winProbability) {
+                // Trúng thưởng
+                const randomIndex = Math.floor(Math.random() * availableRewards.length);
+                wonItem = availableRewards[randomIndex];
+                isWinner = true;
+
+                // Tạo bản ghi winner
+                const winner = this.rewardWinnerRepository.create({
+                    brw_code_id: spinTicket.bst_code_id,
+                    brw_wallet_id: walletId,
+                    brw_reward_amount: wonItem.bri_value_usd,
+                    brw_status: BittworldRewardWinnerStatus.CAN_WITHDRAW
+                });
+                await this.rewardWinnerRepository.save(winner);
+
+                this.logger.log(`User ${walletId} won reward: ${wonItem.bri_name} ($${wonItem.bri_value_usd})`);
+            }
+
+            // 6. Tạo lịch sử quay thưởng
+            const spinHistory = this.spinHistoryRepository.create({
+                bsh_wallet_id: walletId,
+                bsh_code_id: spinTicket.bst_code_id,
+                bsh_item_id: wonItem?.bri_id || null,
+                bsh_reward_value_usd: wonItem?.bri_value_usd || 0,
+                bsh_status: isWinner ? SpinResultStatus.SUCCESS : SpinResultStatus.FAILED
+            });
+            await this.spinHistoryRepository.save(spinHistory);
+
+            // 7. Đánh dấu ticket đã sử dụng
+            spinTicket.bst_is_used = true;
+            await this.spinTicketRepository.save(spinTicket);
+
+            return {
+                status: 200,
+                message: isWinner ? 'Congratulations! You won a reward!' : 'Better luck next time!',
+                data: {
+                    won_item: wonItem ? {
+                        id: wonItem.bri_id,
+                        name: wonItem.bri_name,
+                        image_url: wonItem.bri_image_url,
+                        value_usd: wonItem.bri_value_usd
+                    } : undefined,
+                    is_winner: isWinner,
+                    spin_history_id: spinHistory.bsh_id
+                }
+            };
+
+        } catch (error) {
+            this.logger.error(`Error in spinReward: ${error.message}`, error.stack);
             throw error;
         }
     }

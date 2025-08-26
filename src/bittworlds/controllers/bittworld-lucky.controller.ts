@@ -4,6 +4,8 @@ import { BittworldLuckyService } from '../services/bittworld-lucky.service';
 import { LuckyAuthGuard } from '../guards/lk-auth.guard';
 import { LoginDto } from '../dto/login.dto';
 import { AuthResponseDto } from '../dto/auth-response.dto';
+import { SpinRewardDto, SpinRewardResponseDto } from '../dto/spin-reward.dto';
+import { EnterCodeDto, EnterCodeResponseDto } from '../dto/enter-code.dto';
 
 @Controller('bittworld-lucky')
 export class BittworldLuckyController {
@@ -29,5 +31,21 @@ export class BittworldLuckyController {
                 eth_public_key: user.eth_public_key
             }
         };
+    }
+
+    @Post('enter-code')
+    @UseGuards(LuckyAuthGuard)
+    @HttpCode(HttpStatus.OK)
+    async enterCode(@Body() dto: EnterCodeDto, @Req() req: Request): Promise<EnterCodeResponseDto> {
+        const user = (req as any).user;
+        return await this.bittworldLuckyService.enterCode(dto, user.wallet_id);
+    }
+
+    @Post('spin')
+    @UseGuards(LuckyAuthGuard)
+    @HttpCode(HttpStatus.OK)
+    async spinReward(@Req() req: Request): Promise<SpinRewardResponseDto> {
+        const user = (req as any).user;
+        return await this.bittworldLuckyService.spinReward(user.wallet_id);
     }
 }
