@@ -1,6 +1,7 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
 import { ListWallet } from '../../telegram-wallets/entities/list-wallet.entity';
 import { AirdropListPool } from '../../airdrops/entities/airdrop-list-pool.entity';
+import { BittworldRewardWinner } from './bittworld-reward-winner.entity';
 
 export enum RewardCodeType {
   POOL_CREATION = 'pool_creation',
@@ -54,4 +55,7 @@ export class BittworldRewardCode {
 
   @Column({ type: 'timestamp', name: 'brc_expired_at', nullable: true })
   brc_expired_at: Date | null;
+
+  @OneToMany(() => BittworldRewardWinner, winner => winner.reward_code)
+  winners: BittworldRewardWinner[];
 }
