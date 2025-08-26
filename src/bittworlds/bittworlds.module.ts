@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { JwtModule } from '@nestjs/jwt';
+import { PassportModule } from '@nestjs/passport';
 import { BittworldRewards } from './entities/bittworld-rewards.entity';
 import { BittworldWithdraw } from './entities/bittworld-withdraws.entity';
 import { BittworldToken } from './entities/bittworld-token.entity';
@@ -8,6 +10,8 @@ import { BittworldsService } from './services/bittworlds.service';
 import { BittworldsController } from './controllers/bittworlds.controller';
 import { BittworldLuckyController } from './controllers/bittworld-lucky.controller';
 import { BittworldLuckyService } from './services/bittworld-lucky.service';
+import { LuckyAuthGuard } from './guards/lk-auth.guard';
+import { LuckyJwtStrategy } from './strategies/lk-jwt.strategy';
 import { ListWallet } from '../telegram-wallets/entities/list-wallet.entity';
 import { UserWallet } from '../telegram-wallets/entities/user-wallet.entity';
 import { WalletAuth } from '../telegram-wallets/entities/wallet-auth.entity';
@@ -30,6 +34,11 @@ import { AuthModule } from '../auth/auth.module';
             WalletAuth,
             BgAffiliateTree
         ]),
+        JwtModule.register({
+            secret: process.env.JWT_SECRET,
+            signOptions: { expiresIn: '24h' },
+        }),
+        PassportModule,
         SolanaModule,
         ConfigModule,
         ScheduleModule,
@@ -37,7 +46,12 @@ import { AuthModule } from '../auth/auth.module';
         AuthModule
     ],
     controllers: [BittworldsController, BittworldLuckyController],
-    providers: [BittworldsService, BittworldLuckyService],
-    exports: [BittworldsService, BittworldLuckyService]
+    providers: [
+        BittworldsService, 
+        BittworldLuckyService,
+        LuckyAuthGuard,
+        LuckyJwtStrategy
+    ],
+    exports: [BittworldsService, BittworldLuckyService, LuckyAuthGuard]
 })
 export class BittworldsModule {} 

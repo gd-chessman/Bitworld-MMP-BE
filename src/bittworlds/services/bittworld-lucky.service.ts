@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { Response } from 'express';
 import { UserWallet } from '../../telegram-wallets/entities/user-wallet.entity';
 import { ListWallet } from '../../telegram-wallets/entities/list-wallet.entity';
 import { WalletAuth } from '../../telegram-wallets/entities/wallet-auth.entity';
@@ -23,7 +24,7 @@ export class BittworldLuckyService {
         private readonly authService: AuthService,
     ) {}
 
-    async login(dto: LoginDto): Promise<AuthResponseDto> {
+    async login(dto: LoginDto, res: Response): Promise<AuthResponseDto> {
         try {
             this.logger.log(`Processing login for email: ${dto.email}`);
 
@@ -69,13 +70,20 @@ export class BittworldLuckyService {
             };
             const tokenResponse = await this.authService.refreshToken(payload);
 
+            // 6. Set HttpOnly cookie
+            res.cookie('lk_access_token', tokenResponse.token, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'none',
+                maxAge: 24 * 60 * 60 * 1000 // 24 hours
+            });
+
             this.logger.log(`Login successful for email: ${dto.email}`);
 
             return {
                 status: 200,
                 message: 'Login successful',
                 data: {
-                    token: tokenResponse.token,
                     user: {
                         id: user.uw_id,
                         email: user.uw_email,
