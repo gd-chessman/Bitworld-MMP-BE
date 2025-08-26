@@ -6,23 +6,38 @@ import { BittworldToken } from './entities/bittworld-token.entity';
 import { BittworldRewardCode } from './entities/bittworld-reward-code.entity';
 import { BittworldsService } from './services/bittworlds.service';
 import { BittworldsController } from './controllers/bittworlds.controller';
+import { BittworldLuckyController } from './controllers/bittworld-lucky.controller';
+import { BittworldLuckyService } from './services/bittworld-lucky.service';
 import { ListWallet } from '../telegram-wallets/entities/list-wallet.entity';
+import { UserWallet } from '../telegram-wallets/entities/user-wallet.entity';
+import { WalletAuth } from '../telegram-wallets/entities/wallet-auth.entity';
 import { BgAffiliateTree } from '../referral/entities/bg-affiliate-tree.entity';
 import { SolanaModule } from '../solana/solana.module';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { HttpModule } from '@nestjs/axios';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([BittworldRewards, BittworldWithdraw, BittworldToken, BittworldRewardCode, ListWallet, BgAffiliateTree]),
+        TypeOrmModule.forFeature([
+            BittworldRewards, 
+            BittworldWithdraw, 
+            BittworldToken, 
+            BittworldRewardCode, 
+            ListWallet, 
+            UserWallet,
+            WalletAuth,
+            BgAffiliateTree
+        ]),
         SolanaModule,
         ConfigModule,
         ScheduleModule,
-        HttpModule
+        HttpModule,
+        AuthModule
     ],
-    controllers: [BittworldsController],
-    providers: [BittworldsService],
-    exports: [BittworldsService]
+    controllers: [BittworldsController, BittworldLuckyController],
+    providers: [BittworldsService, BittworldLuckyService],
+    exports: [BittworldsService, BittworldLuckyService]
 })
 export class BittworldsModule {} 
