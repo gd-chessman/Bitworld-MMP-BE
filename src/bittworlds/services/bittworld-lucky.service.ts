@@ -16,6 +16,7 @@ import { LoginDto } from '../dto/login.dto';
 import { AuthResponseDto } from '../dto/auth-response.dto';
 import { SpinRewardDto, SpinRewardResponseDto } from '../dto/spin-reward.dto';
 import { EnterCodeDto, EnterCodeResponseDto } from '../dto/enter-code.dto';
+import { SpinTicketsResponseDto } from '../dto/spin-tickets.dto';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -310,6 +311,55 @@ export class BittworldLuckyService {
 
         } catch (error) {
             this.logger.error(`Error in spinReward: ${error.message}`, error.stack);
+            throw error;
+        }
+    }
+
+    async getSpinTickets(walletId: number): Promise<SpinTicketsResponseDto> {
+        try {
+            this.logger.log(`Getting spin tickets for wallet: ${walletId}`);
+
+            const now = new Date();
+            
+            // Lấy tất cả spin tickets của wallet
+            const allTickets = await this.spinTicketRepository.find({
+                where: { bst_wallet_id: walletId },
+                order: { bst_created_at: 'DESC' }
+            });
+
+            // Phân loại tickets
+            const availableTickets = allTickets.filter(ticket => 
+                !ticket.bst_is_used && ticket.bst_expired_at > now
+            );
+            
+            const usedTickets = allTickets.filter(ticket => 
+                ticket.bst_is_used
+            );
+
+            // Tạo response data
+            const ticketsData = allTickets.map(ticket => ({
+                id: ticket.bst_id,
+                is_used: ticket.bst_is_used,
+                created_at: ticket.bst_created_at,
+                expires_at: ticket.bst_expired_at,
+                code_info: undefined // Không có relation với reward_code
+            }));
+
+            this.logger.log(`Found ${availableTickets.length} available tickets and ${usedTickets.length} used tickets for wallet ${walletId}`);
+
+            return {
+                status: 200,
+                message: 'Spin tickets retrieved successfully',
+                data: {
+                    available_tickets: availableTickets.length,
+                    used_tickets: usedTickets.length,
+                    total_tickets: allTickets.length,
+                    tickets: ticketsData
+                }
+            };
+
+        } catch (error) {
+            this.logger.error(`Error in getSpinTickets: ${error.message}`, error.stack);
             throw error;
         }
     }

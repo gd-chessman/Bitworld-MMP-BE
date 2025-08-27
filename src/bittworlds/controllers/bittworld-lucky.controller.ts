@@ -6,6 +6,7 @@ import { LoginDto } from '../dto/login.dto';
 import { AuthResponseDto } from '../dto/auth-response.dto';
 import { SpinRewardDto, SpinRewardResponseDto } from '../dto/spin-reward.dto';
 import { EnterCodeDto, EnterCodeResponseDto } from '../dto/enter-code.dto';
+import { SpinTicketsResponseDto } from '../dto/spin-tickets.dto';
 
 @Controller('bittworld-lucky')
 export class BittworldLuckyController {
@@ -47,5 +48,12 @@ export class BittworldLuckyController {
     async spinReward(@Req() req: Request): Promise<SpinRewardResponseDto> {
         const user = (req as any).user;
         return await this.bittworldLuckyService.spinReward(user.wallet_id);
+    }
+
+    @Get('spin-tickets')
+    @UseGuards(LuckyAuthGuard)
+    async getSpinTickets(@Req() req: Request): Promise<SpinTicketsResponseDto> {
+        const user = (req as any).user;
+        return await this.bittworldLuckyService.getSpinTickets(user.wallet_id);
     }
 }
