@@ -46,9 +46,9 @@ export class BittworldLuckyService {
         try {
             this.logger.log(`Processing login for email: ${dto.email}`);
 
-            // 1. Tìm user theo email
+            // 1. Tìm user theo email (không phân biệt hoa thường)
             const user = await this.userWalletRepository.findOne({
-                where: { uw_email: dto.email },
+                where: { uw_email: dto.email.toLowerCase() },
                 relations: ['wallet_auths', 'wallet_auths.wa_wallet']
             });
 
