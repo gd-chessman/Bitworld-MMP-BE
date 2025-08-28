@@ -781,13 +781,14 @@ export class AirdropAdminService {
           // Get all participants (creator + ACTIVE stakers)
           const participants = new Map<number, { wallet_id: number; wallet_address: string; total_volume: number }>();
 
-          // Add creator to participants (FIXED: Sum all creator stakes)
+          // Add creator to participants (FIXED: Only count actual stakes, not initial pool volume)
           if (pool.originator) {
             const creatorStakeVolume = pool.poolJoins
               .filter(join => join.apj_member === pool.originator.wallet_id && join.apj_status === AirdropPoolJoinStatus.ACTIVE)
               .reduce((sum, join) => sum + parseFloat(join.apj_volume?.toString() || '0'), 0);
             
-            const creatorTotalVolume = parseFloat(pool.apl_volume?.toString() || '0') + creatorStakeVolume;
+            // ✅ CHỈ TÍNH VOLUME STAKE THỰC TẾ, KHÔNG TÍNH apl_volume
+            const creatorTotalVolume = creatorStakeVolume;
             
             participants.set(pool.originator.wallet_id, {
               wallet_id: pool.originator.wallet_id,
@@ -795,7 +796,7 @@ export class AirdropAdminService {
               total_volume: creatorTotalVolume
             });
 
-            this.logger.log(`Added creator ${pool.originator.wallet_id} with total volume: ${creatorTotalVolume} (initial: ${pool.apl_volume}, stakes: ${creatorStakeVolume})`);
+            this.logger.log(`Added creator ${pool.originator.wallet_id} with total volume: ${creatorTotalVolume} (stakes only, initial pool volume: ${pool.apl_volume} excluded)`);
           }
 
           // Add all ACTIVE stakers to participants (FIXED: Sum all stakes for each user)
@@ -899,6 +900,25 @@ export class AirdropAdminService {
                 });
                 this.logger.log(`Created PARTICIPATION_SHARE reward for staker ${walletId}: ${participantReward} tokens`);
               }
+            }
+          }
+
+          // If no one staked in this pool, grant the entire 90% participation share to the creator
+          if (pool.originator) {
+            const creatorStats = participants.get(pool.originator.wallet_id);
+            const totalStakeVolumeInPool = Array.from(participants.values()).reduce((sum, p) => sum + (p.total_volume || 0), 0);
+            if ((participants.size === 0 || (participants.size === 1 && creatorStats && (creatorStats.total_volume || 0) === 0)) && remainingReward > 0) {
+              rewardsToCreate.push({
+                ar_token_airdrop_id: token.alt_id,
+                ar_wallet_id: pool.originator.wallet_id,
+                ar_wallet_address: creatorStats?.wallet_address || pool.originator.wallet_solana_address,
+                ar_amount: remainingReward,
+                ar_type: AirdropRewardType.TYPE_1,
+                ar_sub_type: AirdropRewardSubType.PARTICIPATION_SHARE,
+                ar_status: AirdropRewardStatus.CAN_WITHDRAW,
+                ar_hash: null
+              });
+              this.logger.log(`No stakers in pool ${pool.alp_id}. Granted full 90% Participation Share (${remainingReward}) to creator ${pool.originator.wallet_id}`);
             }
           }
 
