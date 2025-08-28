@@ -778,26 +778,8 @@ export class AirdropAdminService {
           const creatorReward = poolRewardAmount * 0.1; // 10% x Y
           const remainingReward = poolRewardAmount * 0.9; // 90% x Y
 
-          // Get all participants (creator + ACTIVE stakers)
+          // Get all participants (aggregate ACTIVE stakes per wallet)
           const participants = new Map<number, { wallet_id: number; wallet_address: string; total_volume: number }>();
-
-          // Add creator to participants (FIXED: Only count actual stakes, not initial pool volume)
-          if (pool.originator) {
-            const creatorStakeVolume = pool.poolJoins
-              .filter(join => join.apj_member === pool.originator.wallet_id && join.apj_status === AirdropPoolJoinStatus.ACTIVE)
-              .reduce((sum, join) => sum + parseFloat(join.apj_volume?.toString() || '0'), 0);
-            
-            // ✅ CHỈ TÍNH VOLUME STAKE THỰC TẾ, KHÔNG TÍNH apl_volume
-            const creatorTotalVolume = creatorStakeVolume;
-            
-            participants.set(pool.originator.wallet_id, {
-              wallet_id: pool.originator.wallet_id,
-              wallet_address: pool.originator.wallet_solana_address,
-              total_volume: creatorTotalVolume
-            });
-
-            this.logger.log(`Added creator ${pool.originator.wallet_id} with total volume: ${creatorTotalVolume} (stakes only, initial pool volume: ${pool.apl_volume} excluded)`);
-          }
 
           // Add all ACTIVE stakers to participants (FIXED: Sum all stakes for each user)
           for (const join of pool.poolJoins) {
@@ -831,6 +813,16 @@ export class AirdropAdminService {
             }
           }
 
+          // Ensure creator exists in participants map (with 0 if no stake) to compute Participation from initial volume later
+          if (pool.originator && !participants.has(pool.originator.wallet_id)) {
+            participants.set(pool.originator.wallet_id, {
+              wallet_id: pool.originator.wallet_id,
+              wallet_address: pool.originator.wallet_solana_address,
+              total_volume: 0
+            });
+            this.logger.log(`Creator ${pool.originator.wallet_id} has no active stakes. Added with total_volume=0 to allow Participation via initial volume.`);
+          }
+
           this.logger.log(`Total participants in pool ${pool.alp_id}: ${participants.size}`);
 
           // Calculate total volume of all participants
@@ -845,13 +837,13 @@ export class AirdropAdminService {
               const creatorInitialVolume = parseFloat(pool.apl_volume?.toString() || '0');
               const creatorStakeVolume = participant.total_volume;
               
-              // If creator has stake, use stake volume. If not, use initial volume
-              const creatorVolumeForParticipation = creatorStakeVolume > 0 ? creatorStakeVolume : creatorInitialVolume;
+              // Creator always gets Participation based on total contribution (initial + stake)
+              const creatorVolumeForParticipation = creatorInitialVolume + creatorStakeVolume;
               const creatorSharePercentage = creatorVolumeForParticipation / poolTotalVolume;
               const creatorRemainingReward = remainingReward * creatorSharePercentage;
               participantReward = creatorReward + creatorRemainingReward;
               
-              this.logger.log(`Creator ${walletId} reward: ${creatorReward} (10%) + ${creatorRemainingReward} (90% share based on volume ${creatorVolumeForParticipation} = ${creatorStakeVolume > 0 ? 'stake' : 'initial'}) = ${participantReward}`);
+              this.logger.log(`Creator ${walletId} reward: ${creatorReward} (10%) + ${creatorRemainingReward} (90% share based on total contribution ${creatorVolumeForParticipation} = initial ${creatorInitialVolume} + stake ${creatorStakeVolume}) = ${participantReward}`);
               this.logger.log(`DEBUG: Pool ${pool.alp_id} - poolTotalVolume: ${poolTotalVolume}, creatorSharePercentage: ${creatorSharePercentage}, remainingReward: ${remainingReward}`);
           } else {
             // Stakers get their share of the remaining 90%
@@ -877,10 +869,10 @@ export class AirdropAdminService {
                   this.logger.log(`Created LEADER_BONUS reward for creator ${walletId}: ${creatorReward} tokens`);
                 }
 
-                // Record cho Participation Share (90% share) based on volume (stake or initial)
+                // Record cho Participation Share (90% share) based on total contribution (initial + stake)
                 const creatorInitialVolume = parseFloat(pool.apl_volume?.toString() || '0');
                 const creatorStakeVolume = participant.total_volume;
-                const creatorVolumeForParticipation = creatorStakeVolume > 0 ? creatorStakeVolume : creatorInitialVolume;
+                const creatorVolumeForParticipation = creatorInitialVolume + creatorStakeVolume;
                 const creatorRemainingReward = remainingReward * (creatorVolumeForParticipation / poolTotalVolume);
                 if (creatorRemainingReward > 0) {
                   rewardsToCreate.push({
