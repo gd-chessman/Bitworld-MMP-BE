@@ -798,9 +798,9 @@ export class AirdropAdminService {
             this.logger.log(`Added creator ${pool.originator.wallet_id} with total volume: ${creatorTotalVolume}`);
           }
 
-          // Add all ACTIVE stakers to participants
+          // Add all ACTIVE stakers to participants (FIXED: Sum all stakes for each user)
           for (const join of pool.poolJoins) {
-            if (join.apj_status === AirdropPoolJoinStatus.ACTIVE && !participants.has(join.apj_member)) {
+            if (join.apj_status === AirdropPoolJoinStatus.ACTIVE) {
               const stakerWallet = await this.airdropPoolJoinRepository
                 .createQueryBuilder('join')
                 .leftJoinAndSelect('join.member', 'wallet')
@@ -809,13 +809,21 @@ export class AirdropAdminService {
 
               if (stakerWallet?.member) {
                 const stakerVolume = parseFloat(join.apj_volume?.toString() || '0');
-                participants.set(join.apj_member, {
-                  wallet_id: join.apj_member,
-                  wallet_address: stakerWallet.member.wallet_solana_address,
-                  total_volume: stakerVolume
-                });
-
-                this.logger.log(`Added active staker ${join.apj_member} with volume: ${stakerVolume}`);
+                
+                if (participants.has(join.apj_member)) {
+                  // ✅ CỘNG DỒN VOLUME NẾU USER ĐÃ TỒN TẠI
+                  const existingParticipant = participants.get(join.apj_member)!;
+                  existingParticipant.total_volume += stakerVolume;
+                  this.logger.log(`Updated staker ${join.apj_member} with additional volume: ${stakerVolume} (total: ${existingParticipant.total_volume})`);
+                } else {
+                  // ✅ THÊM USER MỚI
+                  participants.set(join.apj_member, {
+                    wallet_id: join.apj_member,
+                    wallet_address: stakerWallet.member.wallet_solana_address,
+                    total_volume: stakerVolume
+                  });
+                  this.logger.log(`Added new active staker ${join.apj_member} with volume: ${stakerVolume}`);
+                }
               } else {
                 this.logger.warn(`Active staker wallet ${join.apj_member} not found for pool ${pool.alp_id}`);
               }
