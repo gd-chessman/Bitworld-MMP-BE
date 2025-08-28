@@ -842,11 +842,17 @@ export class AirdropAdminService {
 
             if (pool.originator && walletId === pool.originator.wallet_id) {
               // Creator gets 10% + their share of the remaining 90%
-              const creatorSharePercentage = participant.total_volume / poolTotalVolume;
+              const creatorInitialVolume = parseFloat(pool.apl_volume?.toString() || '0');
+              const creatorStakeVolume = participant.total_volume;
+              
+              // If creator has stake, use stake volume. If not, use initial volume
+              const creatorVolumeForParticipation = creatorStakeVolume > 0 ? creatorStakeVolume : creatorInitialVolume;
+              const creatorSharePercentage = creatorVolumeForParticipation / poolTotalVolume;
               const creatorRemainingReward = remainingReward * creatorSharePercentage;
               participantReward = creatorReward + creatorRemainingReward;
               
-                          this.logger.log(`Creator ${walletId} reward: ${creatorReward} (10%) + ${creatorRemainingReward} (90% share) = ${participantReward}`);
+              this.logger.log(`Creator ${walletId} reward: ${creatorReward} (10%) + ${creatorRemainingReward} (90% share based on volume ${creatorVolumeForParticipation} = ${creatorStakeVolume > 0 ? 'stake' : 'initial'}) = ${participantReward}`);
+              this.logger.log(`DEBUG: Pool ${pool.alp_id} - poolTotalVolume: ${poolTotalVolume}, creatorSharePercentage: ${creatorSharePercentage}, remainingReward: ${remainingReward}`);
           } else {
             // Stakers get their share of the remaining 90%
             const stakerSharePercentage = participant.total_volume / poolTotalVolume;
@@ -871,8 +877,11 @@ export class AirdropAdminService {
                   this.logger.log(`Created LEADER_BONUS reward for creator ${walletId}: ${creatorReward} tokens`);
                 }
 
-                // Record cho Participation Share (90% share)
-                const creatorRemainingReward = remainingReward * (participant.total_volume / poolTotalVolume);
+                // Record cho Participation Share (90% share) based on volume (stake or initial)
+                const creatorInitialVolume = parseFloat(pool.apl_volume?.toString() || '0');
+                const creatorStakeVolume = participant.total_volume;
+                const creatorVolumeForParticipation = creatorStakeVolume > 0 ? creatorStakeVolume : creatorInitialVolume;
+                const creatorRemainingReward = remainingReward * (creatorVolumeForParticipation / poolTotalVolume);
                 if (creatorRemainingReward > 0) {
                   rewardsToCreate.push({
                     ar_token_airdrop_id: token.alt_id,
@@ -903,15 +912,17 @@ export class AirdropAdminService {
             }
           }
 
-          // If no one staked in this pool, grant the entire 90% participation share to the creator
+          // Handle special cases for creator
           if (pool.originator) {
             const creatorStats = participants.get(pool.originator.wallet_id);
             const totalStakeVolumeInPool = Array.from(participants.values()).reduce((sum, p) => sum + (p.total_volume || 0), 0);
-            if ((participants.size === 0 || (participants.size === 1 && creatorStats && (creatorStats.total_volume || 0) === 0)) && remainingReward > 0) {
+            
+            // Case 1: No one staked at all - creator gets 10% + 90% = 100%
+            if (participants.size === 0 && remainingReward > 0) {
               rewardsToCreate.push({
                 ar_token_airdrop_id: token.alt_id,
                 ar_wallet_id: pool.originator.wallet_id,
-                ar_wallet_address: creatorStats?.wallet_address || pool.originator.wallet_solana_address,
+                ar_wallet_address: pool.originator.wallet_solana_address,
                 ar_amount: remainingReward,
                 ar_type: AirdropRewardType.TYPE_1,
                 ar_sub_type: AirdropRewardSubType.PARTICIPATION_SHARE,
@@ -919,6 +930,10 @@ export class AirdropAdminService {
                 ar_hash: null
               });
               this.logger.log(`No stakers in pool ${pool.alp_id}. Granted full 90% Participation Share (${remainingReward}) to creator ${pool.originator.wallet_id}`);
+            }
+            // Case 2: Creator didn't stake but others did - creator already got Participation Share in main loop
+            else if (creatorStats && creatorStats.total_volume === 0 && participants.size > 1) {
+              this.logger.log(`Creator ${pool.originator.wallet_id} didn't stake but others did. Creator already got Participation Share in main loop`);
             }
           }
 
