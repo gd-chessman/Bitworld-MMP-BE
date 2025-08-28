@@ -1343,10 +1343,12 @@ export class AdminService implements OnModuleInit {
       sum + Number(reward.bacr_commission_amount), 0
     );
 
-    // Tính tổng volume từ trading_orders
+    // Tính tổng volume từ trading_orders - chỉ tính volume của các ví tham gia BG Affiliate
     const volumeStats = await this.dataSource.createQueryBuilder()
       .select('COALESCE(SUM(orders.order_total_value), 0)', 'totalVolume')
       .from('trading_orders', 'orders')
+      .innerJoin('bg_affiliate_nodes', 'nodes', 'orders.order_wallet_id = nodes.ban_wallet_id')
+      .where('orders.order_status = :status', { status: 'executed' })
       .getRawOne();
 
     const totalVolume = parseFloat(volumeStats?.totalVolume || '0');
