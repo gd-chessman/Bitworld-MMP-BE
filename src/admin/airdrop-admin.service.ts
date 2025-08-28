@@ -840,17 +840,17 @@ export class AirdropAdminService {
             let participantReward = 0;
 
             if (pool.originator && walletId === pool.originator.wallet_id) {
-              // Creator gets 10% + their share of the remaining 90%
+              // Creator gets 10% + their share of the remaining 90% (only if there are other participants)
               const creatorSharePercentage = participant.total_volume / poolTotalVolume;
-              const creatorRemainingReward = remainingReward * creatorSharePercentage;
+              const creatorRemainingReward = participants.size > 1 ? remainingReward * creatorSharePercentage : 0;
               participantReward = creatorReward + creatorRemainingReward;
               
-                          this.logger.log(`Creator ${walletId} reward: ${creatorReward} (10%) + ${creatorRemainingReward} (90% share) = ${participantReward}`);
-          } else {
-            // Stakers get their share of the remaining 90%
-            const stakerSharePercentage = participant.total_volume / poolTotalVolume;
-            participantReward = remainingReward * stakerSharePercentage;
-          }
+              this.logger.log(`Creator ${walletId} reward: ${creatorReward} (10%) + ${creatorRemainingReward} (90% share - ${participants.size > 1 ? 'shared with others' : 'no other participants'}) = ${participantReward}`);
+            } else {
+              // Stakers get their share of the remaining 90%
+              const stakerSharePercentage = participant.total_volume / poolTotalVolume;
+              participantReward = remainingReward * stakerSharePercentage;
+            }
 
             if (participantReward > 0) {
               // Tách riêng reward cho creator thành 2 records: leader_bonus và participation_share
@@ -870,8 +870,8 @@ export class AirdropAdminService {
                   this.logger.log(`Created LEADER_BONUS reward for creator ${walletId}: ${creatorReward} tokens`);
                 }
 
-                // Record cho Participation Share (90% share)
-                const creatorRemainingReward = remainingReward * (participant.total_volume / poolTotalVolume);
+                // Record cho Participation Share (90% share) - chỉ khi có stakers khác
+                const creatorRemainingReward = participants.size > 1 ? remainingReward * (participant.total_volume / poolTotalVolume) : 0;
                 if (creatorRemainingReward > 0) {
                   rewardsToCreate.push({
                     ar_token_airdrop_id: token.alt_id,
@@ -883,7 +883,9 @@ export class AirdropAdminService {
                     ar_status: AirdropRewardStatus.CAN_WITHDRAW,
                     ar_hash: null
                   });
-                  this.logger.log(`Created PARTICIPATION_SHARE reward for creator ${walletId}: ${creatorRemainingReward} tokens`);
+                  this.logger.log(`Created PARTICIPATION_SHARE reward for creator ${walletId}: ${creatorRemainingReward} tokens (${participants.size} participants in pool)`);
+                } else if (participants.size === 1) {
+                  this.logger.log(`Creator ${walletId} is the only participant, skipping PARTICIPATION_SHARE reward`);
                 }
               } else {
                 // Record cho Staker (90% share)
