@@ -1461,8 +1461,20 @@ export class AdminService implements OnModuleInit {
         })
     );
 
+    // Lọc totalTrees theo isBittworld nếu có
+    let totalTrees = allTrees.length;
+    if (allowedWalletIds) {
+      // Đếm số trees có root node thuộc allowedWalletIds
+      totalTrees = allTrees.filter(tree => {
+        const rootNode = allNodes.find(node => 
+          node.ban_tree_id === tree.bat_id && node.ban_parent_wallet_id === null
+        );
+        return rootNode && allowedWalletIds!.has(rootNode.ban_wallet_id);
+      }).length;
+    }
+
     return {
-      totalTrees: allTrees.length,
+      totalTrees,
       totalMembers,
       totalCommissionDistributed: Number(totalCommissionDistributed.toFixed(5)),
       totalVolume: Number(totalVolume.toFixed(2)),
