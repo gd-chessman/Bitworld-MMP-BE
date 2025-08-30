@@ -443,10 +443,8 @@ export class LoginEmailService {
                 });
 
                 if (!referrerWallet) {
-                    return {
-                        status: 400,
-                        message: 'Invalid referral code'
-                    };
+                    this.logger.warn(`Invalid referral code provided: ${dto.refCode}, proceeding without referral`);
+                    // Bỏ qua nếu mã giới thiệu không hợp lệ
                 }
             }
 
