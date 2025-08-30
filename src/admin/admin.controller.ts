@@ -369,9 +369,12 @@ export class AdminController {
   @UseGuards(JwtAuthAdminGuard)
   @Get('dashboard/statistics')
   @ApiOperation({ summary: 'Get dashboard overview statistics' })
+  @ApiQuery({ name: 'isBittworld', required: false, description: 'Filter by Bittworld users (true/false)' })
   @ApiResponse({ status: 200, description: 'Returns comprehensive dashboard statistics' })
-  async getDashboardStatistics(): Promise<any> {
-    return this.adminService.getDashboardStatistics();
+  async getDashboardStatistics(
+    @Query('isBittworld') isBittworld?: string
+  ): Promise<any> {
+    return this.adminService.getDashboardStatistics(isBittworld);
   }
 
 

@@ -1336,7 +1336,7 @@ export class AdminService implements OnModuleInit {
   /**
    * Lấy thống kê tổng quan BG affiliate - tập trung vào phần thưởng
    */
-  async getBgAffiliateOverview(): Promise<{
+  async getBgAffiliateOverview(isBittworld?: string): Promise<{
     totalTrees: number;
     totalMembers: number;
     totalCommissionDistributed: number;
@@ -1364,12 +1364,19 @@ export class AdminService implements OnModuleInit {
     );
 
     // Tính tổng volume từ trading_orders - chỉ tính volume của các ví tham gia BG Affiliate
-    const volumeStats = await this.dataSource.createQueryBuilder()
+    const volumeStatsQuery = this.dataSource.createQueryBuilder()
       .select('COALESCE(SUM(orders.order_total_value), 0)', 'totalVolume')
       .from('trading_orders', 'orders')
       .innerJoin('bg_affiliate_nodes', 'nodes', 'orders.order_wallet_id = nodes.ban_wallet_id')
-      .where('orders.order_status = :status', { status: 'executed' })
-      .getRawOne();
+      .leftJoin('list_wallets', 'wallet', 'wallet.wallet_id = orders.order_wallet_id')
+      .where('orders.order_status = :status', { status: 'executed' });
+
+    if (isBittworld !== undefined && isBittworld !== null) {
+      const isBittworldBool = isBittworld === 'true';
+      volumeStatsQuery.andWhere('wallet.isBittworld = :isBittworld', { isBittworld: isBittworldBool });
+    }
+
+    const volumeStats = await volumeStatsQuery.getRawOne();
 
     const totalVolume = parseFloat(volumeStats?.totalVolume || '0');
 
@@ -1381,8 +1388,23 @@ export class AdminService implements OnModuleInit {
       walletEarnings.set(reward.bacr_wallet_id, currentEarning + Number(reward.bacr_commission_amount));
     });
 
+    // Lọc top earners theo isBittworld nếu có
+    let filteredWalletEarnings = Array.from(walletEarnings.entries());
+    
+    if (isBittworld !== undefined && isBittworld !== null) {
+      const isBittworldBool = isBittworld === 'true';
+      const filteredWalletIds = await this.listWalletRepository
+        .createQueryBuilder('wallet')
+        .select('wallet.wallet_id')
+        .where('wallet.isBittworld = :isBittworld', { isBittworld: isBittworldBool })
+        .getMany();
+      
+      const allowedWalletIds = new Set(filteredWalletIds.map(w => w.wallet_id));
+      filteredWalletEarnings = filteredWalletEarnings.filter(([walletId]) => allowedWalletIds.has(walletId));
+    }
+
     const topEarners = await Promise.all(
-      Array.from(walletEarnings.entries())
+      filteredWalletEarnings
         .sort(([, a], [, b]) => b - a)
         .slice(0, 10)
         .map(async ([walletId, totalEarned]) => {
@@ -1412,7 +1434,7 @@ export class AdminService implements OnModuleInit {
     /**
    * Lấy thống kê tổng quan cho dashboard
    */
-    async getDashboardStatistics(): Promise<{
+    async getDashboardStatistics(isBittworld?: string): Promise<{
       wallets: {
         totalWallets: number;
         activeWallets: number;
@@ -1449,10 +1471,21 @@ export class AdminService implements OnModuleInit {
       };
     }> {
       // ==================== WALLET STATISTICS ====================
-      const totalWallets = await this.listWalletRepository.count();
+      let walletWhereCondition = {};
+      if (isBittworld !== undefined && isBittworld !== null) {
+        const isBittworldBool = isBittworld === 'true';
+        walletWhereCondition = { isBittworld: isBittworldBool };
+      }
+
+      const totalWallets = await this.listWalletRepository.count({
+        where: walletWhereCondition
+      });
       
       const activeWallets = await this.listWalletRepository.count({
-        where: { wallet_status: true }
+        where: { 
+          wallet_status: true,
+          ...walletWhereCondition
+        }
       });
   
       // Tính ví mới hôm nay và tuần này (giả định dựa trên wallet_id)
@@ -1461,21 +1494,43 @@ export class AdminService implements OnModuleInit {
       const newWalletsThisWeek = 0;
   
       // ==================== ORDER STATISTICS ====================
-      const totalOrders = await this.tradingOrderRepository.count();
-      const executedOrders = await this.tradingOrderRepository.count({
-        where: { order_status: 'executed' }
-      });
-      const pendingOrders = await this.tradingOrderRepository.count({
-        where: { order_status: 'pending' }
-      });
+      const totalOrders = await this.tradingOrderRepository
+        .createQueryBuilder('o')
+        .leftJoin('o.wallet', 'wallet')
+        .where(isBittworld !== undefined && isBittworld !== null ? 'wallet.isBittworld = :isBittworld' : '1=1', 
+          isBittworld !== undefined && isBittworld !== null ? { isBittworld: isBittworld === 'true' } : {})
+        .getCount();
+
+      const executedOrders = await this.tradingOrderRepository
+        .createQueryBuilder('o')
+        .leftJoin('o.wallet', 'wallet')
+        .where('o.order_status = :status', { status: 'executed' })
+        .andWhere(isBittworld !== undefined && isBittworld !== null ? 'wallet.isBittworld = :isBittworld' : '1=1', 
+          isBittworld !== undefined && isBittworld !== null ? { isBittworld: isBittworld === 'true' } : {})
+        .getCount();
+
+      const pendingOrders = await this.tradingOrderRepository
+        .createQueryBuilder('o')
+        .leftJoin('o.wallet', 'wallet')
+        .where('o.order_status = :status', { status: 'pending' })
+        .andWhere(isBittworld !== undefined && isBittworld !== null ? 'wallet.isBittworld = :isBittworld' : '1=1', 
+          isBittworld !== undefined && isBittworld !== null ? { isBittworld: isBittworld === 'true' } : {})
+        .getCount();
   
       // Tính tổng volume và average order value từ trading_orders
-      const orderStats = await this.dataSource.createQueryBuilder()
+      const orderStatsQuery = this.dataSource.createQueryBuilder()
         .select('COALESCE(SUM(orders.order_total_value), 0)', 'totalVolume')
         .addSelect('COALESCE(AVG(orders.order_total_value), 0)', 'averageValue')
         .from('trading_orders', 'orders')
-        .where('orders.order_status = :status', { status: 'executed' })
-        .getRawOne();
+        .leftJoin('list_wallets', 'wallet', 'wallet.wallet_id = orders.order_wallet_id')
+        .where('orders.order_status = :status', { status: 'executed' });
+
+      if (isBittworld !== undefined && isBittworld !== null) {
+        const isBittworldBool = isBittworld === 'true';
+        orderStatsQuery.andWhere('wallet.isBittworld = :isBittworld', { isBittworld: isBittworldBool });
+      }
+
+      const orderStats = await orderStatsQuery.getRawOne();
   
       // Tính tổng volume từ master_transaction_detail
       const masterTradingVolumeStats = await this.dataSource.createQueryBuilder()
@@ -1490,7 +1545,7 @@ export class AdminService implements OnModuleInit {
       const averageOrderValue = parseFloat(orderStats?.averageValue || '0');
   
       // Tìm ví giao dịch nhiều nhất
-      const mostActiveWallet = await this.tradingOrderRepository
+      const mostActiveWalletQuery = this.tradingOrderRepository
         .createQueryBuilder('o')
         .select('o.order_wallet_id', 'walletId')
         .addSelect('COUNT(*)', 'orderCount')
@@ -1501,8 +1556,14 @@ export class AdminService implements OnModuleInit {
         .addGroupBy('wallet.wallet_nick_name')
         .addGroupBy('wallet.wallet_solana_address')
         .orderBy('COUNT(*)', 'DESC')
-        .limit(1)
-        .getRawOne();
+        .limit(1);
+
+      if (isBittworld !== undefined && isBittworld !== null) {
+        const isBittworldBool = isBittworld === 'true';
+        mostActiveWalletQuery.andWhere('wallet.isBittworld = :isBittworld', { isBittworld: isBittworldBool });
+      }
+
+      const mostActiveWallet = await mostActiveWalletQuery.getRawOne();
   
       // ==================== REFERRAL STATISTICS ====================
       
@@ -1558,7 +1619,7 @@ export class AdminService implements OnModuleInit {
       }, 0);
   
       // BG Affiliate Stats
-      const bgAffiliateOverview = await this.getBgAffiliateOverview();
+      const bgAffiliateOverview = await this.getBgAffiliateOverview(isBittworld);
   
       // Tính volume cho traditional referrals
       const traditionalWalletsArray = Array.from(uniqueTraditionalWallets);
