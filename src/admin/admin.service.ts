@@ -811,13 +811,26 @@ export class AdminService implements OnModuleInit {
     };
   }
 
-  async getOrderStats() {
+  async getOrderStats(isBittworld?: string) {
     // Tổng số order
-    const total = await this.tradingOrderRepository.count();
+    const total = await this.tradingOrderRepository
+      .createQueryBuilder('o')
+      .leftJoin('o.wallet', 'wallet')
+      .where(isBittworld !== undefined && isBittworld !== null ? 'wallet.isBittworld = :isBittworld' : '1=1', 
+        isBittworld !== undefined && isBittworld !== null ? { isBittworld: isBittworld === 'true' } : {})
+      .getCount();
+
     // Tổng số order thành công
-    const executed = await this.tradingOrderRepository.count({ where: { order_status: 'executed' } });
+    const executed = await this.tradingOrderRepository
+      .createQueryBuilder('o')
+      .leftJoin('o.wallet', 'wallet')
+      .where('o.order_status = :status', { status: 'executed' })
+      .andWhere(isBittworld !== undefined && isBittworld !== null ? 'wallet.isBittworld = :isBittworld' : '1=1', 
+        isBittworld !== undefined && isBittworld !== null ? { isBittworld: isBittworld === 'true' } : {})
+      .getCount();
+
     // Ví giao dịch nhiều nhất
-    const most = await this.tradingOrderRepository
+    const mostQuery = this.tradingOrderRepository
       .createQueryBuilder('o')
       .select('o.order_wallet_id', 'walletId')
       .addSelect('COUNT(*)', 'orderCount')
@@ -826,8 +839,15 @@ export class AdminService implements OnModuleInit {
       .groupBy('o.order_wallet_id')
       .addGroupBy('wallet.wallet_solana_address')
       .orderBy('COUNT(*)', 'DESC')
-      .limit(1)
-      .getRawOne();
+      .limit(1);
+
+    if (isBittworld !== undefined && isBittworld !== null) {
+      const isBittworldBool = isBittworld === 'true';
+      mostQuery.andWhere('wallet.isBittworld = :isBittworld', { isBittworld: isBittworldBool });
+    }
+
+    const most = await mostQuery.getRawOne();
+
     return {
       total,
       executed,

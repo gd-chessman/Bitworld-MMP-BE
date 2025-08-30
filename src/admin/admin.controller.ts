@@ -430,9 +430,12 @@ export class AdminController {
   @UseGuards(JwtAuthAdminGuard)
   @Get('order-statistics')
   @ApiOperation({ summary: 'Get order statistics' })
+  @ApiQuery({ name: 'isBittworld', required: false, description: 'Filter by Bittworld users (true/false)' })
   @ApiResponse({ status: 200, description: 'Returns order statistics' })
-  async getOrderStats() {
-    return this.adminService.getOrderStats();
+  async getOrderStats(
+    @Query('isBittworld') isBittworld?: string
+  ) {
+    return this.adminService.getOrderStats(isBittworld);
   }
 
   @UseGuards(JwtAuthAdminGuard)
