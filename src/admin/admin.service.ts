@@ -36,6 +36,7 @@ import { BittworldRewards } from '../bittworlds/entities/bittworld-rewards.entit
 import { BittworldWithdraw } from '../bittworlds/entities/bittworld-withdraws.entity';
 import { BittworldToken } from '../bittworlds/entities/bittworld-token.entity';
 import { SolanaTrackerService } from '../on-chain/solana-tracker.service';
+import { SolanaService } from '../solana/solana.service';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { CreateBittworldTokenDto } from './dto/create-bittworld-token.dto';
@@ -43,6 +44,7 @@ import { BittworldTokenResponseDto, CreateBittworldTokenResponseDto } from './dt
 import { UpdateBittworldTokenDto } from './dto/update-bittworld-token.dto';
 import { UpdateBittworldTokenResponseDto } from './dto/update-bittworld-token-response.dto';
 import { DeleteBittworldTokenResponseDto } from './dto/delete-bittworld-token-response.dto';
+
 
 @Injectable()
 export class AdminService implements OnModuleInit {
@@ -86,6 +88,7 @@ export class AdminService implements OnModuleInit {
     @InjectRepository(BittworldToken)
     private bittworldTokenRepository: Repository<BittworldToken>,
     private readonly solanaTrackerService: SolanaTrackerService,
+    private readonly solanaService: SolanaService,
     private readonly configService: ConfigService,
   ) {
     // Initialize swap settings on app start
@@ -746,6 +749,22 @@ export class AdminService implements OnModuleInit {
       }
     }
 
+    // Get current prices for tokens
+    const currentPrices = new Map<string, number>();
+    if (uniqueTokenAddresses.length > 0) {
+      try {
+        const tokenPrices = await this.solanaService.getTokenPricesInRealTime(uniqueTokenAddresses);
+        uniqueTokenAddresses.forEach(tokenAddress => {
+          const priceData = tokenPrices?.get(tokenAddress);
+          if (priceData && priceData.priceUSD) {
+            currentPrices.set(tokenAddress, priceData.priceUSD);
+          }
+        });
+      } catch (error) {
+        this.logger.error(`Error fetching current token prices: ${error.message}`);
+      }
+    }
+
     const data = orders.map(order => {
       // Try to get token info from Solana Tracker
       const trackerToken = trackerTokensData.find((t: any) => t.address === order.order_token_address);
@@ -778,7 +797,8 @@ export class AdminService implements OnModuleInit {
         order_tx_hash: order.order_tx_hash,
         order_error_message: order.order_error_message,
         order_created_at: order.order_created_at,
-        order_executed_at: order.order_executed_at
+        order_executed_at: order.order_executed_at,
+        current_price: currentPrices.get(order.order_token_address) || null
       };
     });
     
@@ -1389,204 +1409,213 @@ export class AdminService implements OnModuleInit {
     };
   }
 
-  /**
+    /**
    * Lấy thống kê tổng quan cho dashboard
    */
-  async getDashboardStatistics(): Promise<{
-    wallets: {
-      totalWallets: number;
-      activeWallets: number;
-      newWalletsToday: number;
-      newWalletsThisWeek: number;
-    };
-    orders: {
-      totalOrders: number;
-      executedOrders: number;
-      pendingOrders: number;
-      totalVolume: number;
-      averageOrderValue: number;
-      mostActiveWallet: {
-        walletId: number;
-        nickName: string;
-        solanaAddress: string;
-        orderCount: number;
-      } | null;
-    };
-    referrals: {
-      traditionalReferrals: {
-        totalRelations: number;
-        totalRewards: number;
-        totalWallets: number;
-        totalVolume: number;
-        averageRewardPerWallet: number;
-      };
-      bgAffiliate: {
-        totalTrees: number;
-        totalMembers: number;
-        totalCommissionDistributed: number;
-        totalVolume: number;
-      };
-    };
-  }> {
-    // ==================== WALLET STATISTICS ====================
-    const totalWallets = await this.listWalletRepository.count();
-    
-    const activeWallets = await this.listWalletRepository.count({
-      where: { wallet_status: true }
-    });
-
-    // Tính ví mới hôm nay và tuần này (giả định dựa trên wallet_id)
-    // Vì không có timestamp, tạm thời đặt là 0
-    const newWalletsToday = 0;
-    const newWalletsThisWeek = 0;
-
-    // ==================== ORDER STATISTICS ====================
-    const totalOrders = await this.tradingOrderRepository.count();
-    const executedOrders = await this.tradingOrderRepository.count({
-      where: { order_status: 'executed' }
-    });
-    const pendingOrders = await this.tradingOrderRepository.count({
-      where: { order_status: 'pending' }
-    });
-
-    // Tính tổng volume và average order value
-    const orderStats = await this.dataSource.createQueryBuilder()
-      .select('COALESCE(SUM(orders.order_total_value), 0)', 'totalVolume')
-      .addSelect('COALESCE(AVG(orders.order_total_value), 0)', 'averageValue')
-      .from('trading_orders', 'orders')
-      .where('orders.order_status = :status', { status: 'executed' })
-      .getRawOne();
-
-    const totalVolume = parseFloat(orderStats?.totalVolume || '0');
-    const averageOrderValue = parseFloat(orderStats?.averageValue || '0');
-
-    // Tìm ví giao dịch nhiều nhất
-    const mostActiveWallet = await this.tradingOrderRepository
-      .createQueryBuilder('o')
-      .select('o.order_wallet_id', 'walletId')
-      .addSelect('COUNT(*)', 'orderCount')
-      .leftJoin('o.wallet', 'wallet')
-      .addSelect('wallet.wallet_nick_name', 'nickName')
-      .addSelect('wallet.wallet_solana_address', 'solanaAddress')
-      .groupBy('o.order_wallet_id')
-      .addGroupBy('wallet.wallet_nick_name')
-      .addGroupBy('wallet.wallet_solana_address')
-      .orderBy('COUNT(*)', 'DESC')
-      .limit(1)
-      .getRawOne();
-
-    // ==================== REFERRAL STATISTICS ====================
-    
-    // Traditional Referral Stats - sử dụng logic giống hệt getTraditionalReferralStatistics
-    const traditionalReferrals = await this.walletReferentRepository.find({
-      relations: ['invitee', 'referent', 'rewards']
-    });
-
-    const uniqueTraditionalWallets = new Set();
-    const walletStats = new Map();
-
-    traditionalReferrals.forEach(referral => {
-      const inviteeId = referral.invitee.wallet_id;
-      const referentId = referral.referent.wallet_id;
-      
-      uniqueTraditionalWallets.add(inviteeId);
-      uniqueTraditionalWallets.add(referentId);
-
-      // Tính reward cho referral này
-      const referralReward = (referral.rewards || []).reduce((sum, reward) => {
-        return sum + (parseFloat(String(reward.wrr_use_reward)) || 0);
-      }, 0);
-
-      // Cập nhật thống kê theo wallet
-      if (!walletStats.has(inviteeId)) {
-        walletStats.set(inviteeId, {
-          walletId: inviteeId,
-          totalInviteeReward: 0,
-          totalReferrerReward: 0
-        });
-      }
-
-      if (!walletStats.has(referentId)) {
-        walletStats.set(referentId, {
-          walletId: referentId,
-          totalInviteeReward: 0,
-          totalReferrerReward: 0
-        });
-      }
-
-      const inviteeWallet = walletStats.get(inviteeId);
-      const referentWallet = walletStats.get(referentId);
-
-      // Cập nhật thống kê wallet
-      inviteeWallet.totalInviteeReward += referralReward;
-      referentWallet.totalReferrerReward += referralReward;
-    });
-
-    // Tính tổng phần thưởng của tất cả ví (giống hệt getTraditionalReferralStatistics)
-    const walletArray = Array.from(walletStats.values());
-    const totalTraditionalRewards = walletArray.reduce((sum, wallet) => {
-      return sum + wallet.totalInviteeReward + wallet.totalReferrerReward;
-    }, 0);
-
-    // BG Affiliate Stats
-    const bgAffiliateOverview = await this.getBgAffiliateOverview();
-
-    // Tính volume cho traditional referrals
-    const traditionalWalletsArray = Array.from(uniqueTraditionalWallets);
-    let traditionalVolume = 0;
-    
-    if (traditionalWalletsArray.length > 0) {
-      const traditionalVolumeStats = await this.dataSource.createQueryBuilder()
-        .select('COALESCE(SUM(orders.order_total_value), 0)', 'totalVolume')
-        .from('trading_orders', 'orders')
-        .where('orders.order_wallet_id IN (:...walletIds)', { 
-          walletIds: traditionalWalletsArray 
-        })
-        .andWhere('orders.order_status = :status', { status: 'executed' })
-        .getRawOne();
-
-      traditionalVolume = parseFloat(traditionalVolumeStats?.totalVolume || '0');
-    }
-
-    return {
+    async getDashboardStatistics(): Promise<{
       wallets: {
-        totalWallets,
-        activeWallets,
-        newWalletsToday,
-        newWalletsThisWeek
-      },
+        totalWallets: number;
+        activeWallets: number;
+        newWalletsToday: number;
+        newWalletsThisWeek: number;
+      };
       orders: {
-        totalOrders,
-        executedOrders,
-        pendingOrders,
-        totalVolume: Number(totalVolume.toFixed(2)),
-        averageOrderValue: Number(averageOrderValue.toFixed(2)),
-        mostActiveWallet: mostActiveWallet ? {
-          walletId: Number(mostActiveWallet.walletId),
-          nickName: mostActiveWallet.nickName || '',
-          solanaAddress: mostActiveWallet.solanaAddress || '',
-          orderCount: Number(mostActiveWallet.orderCount)
-        } : null
-      },
+        totalOrders: number;
+        executedOrders: number;
+        pendingOrders: number;
+        totalVolume: number;
+        averageOrderValue: number;
+        mostActiveWallet: {
+          walletId: number;
+          nickName: string;
+          solanaAddress: string;
+          orderCount: number;
+        } | null;
+      };
       referrals: {
         traditionalReferrals: {
-          totalRelations: traditionalReferrals.length,
-          totalRewards: Number(totalTraditionalRewards.toFixed(5)),
-          totalWallets: uniqueTraditionalWallets.size,
-          totalVolume: Number(traditionalVolume.toFixed(2)),
-          averageRewardPerWallet: uniqueTraditionalWallets.size > 0 
-            ? Number((totalTraditionalRewards / uniqueTraditionalWallets.size).toFixed(5)) 
-            : 0
-        },
+          totalRelations: number;
+          totalRewards: number;
+          totalWallets: number;
+          totalVolume: number;
+          averageRewardPerWallet: number;
+        };
         bgAffiliate: {
-          totalTrees: bgAffiliateOverview.totalTrees,
-          totalMembers: bgAffiliateOverview.totalMembers,
-          totalCommissionDistributed: bgAffiliateOverview.totalCommissionDistributed,
-          totalVolume: bgAffiliateOverview.totalVolume
+          totalTrees: number;
+          totalMembers: number;
+          totalCommissionDistributed: number;
+          totalVolume: number;
+        };
+      };
+    }> {
+      // ==================== WALLET STATISTICS ====================
+      const totalWallets = await this.listWalletRepository.count();
+      
+      const activeWallets = await this.listWalletRepository.count({
+        where: { wallet_status: true }
+      });
+  
+      // Tính ví mới hôm nay và tuần này (giả định dựa trên wallet_id)
+      // Vì không có timestamp, tạm thời đặt là 0
+      const newWalletsToday = 0;
+      const newWalletsThisWeek = 0;
+  
+      // ==================== ORDER STATISTICS ====================
+      const totalOrders = await this.tradingOrderRepository.count();
+      const executedOrders = await this.tradingOrderRepository.count({
+        where: { order_status: 'executed' }
+      });
+      const pendingOrders = await this.tradingOrderRepository.count({
+        where: { order_status: 'pending' }
+      });
+  
+      // Tính tổng volume và average order value từ trading_orders
+      const orderStats = await this.dataSource.createQueryBuilder()
+        .select('COALESCE(SUM(orders.order_total_value), 0)', 'totalVolume')
+        .addSelect('COALESCE(AVG(orders.order_total_value), 0)', 'averageValue')
+        .from('trading_orders', 'orders')
+        .where('orders.order_status = :status', { status: 'executed' })
+        .getRawOne();
+  
+      // Tính tổng volume từ master_transaction_detail
+      const masterTradingVolumeStats = await this.dataSource.createQueryBuilder()
+        .select('COALESCE(SUM(mtd.mt_detail_total_usd), 0)', 'totalVolume')
+        .from('master_transaction_detail', 'mtd')
+        .where('mtd.mt_detail_status = :status', { status: 'success' })
+        .getRawOne();
+  
+      const tradingVolume = parseFloat(orderStats?.totalVolume || '0');
+      const masterTradingVolume = parseFloat(masterTradingVolumeStats?.totalVolume || '0');
+      const totalVolume = tradingVolume + masterTradingVolume;
+      const averageOrderValue = parseFloat(orderStats?.averageValue || '0');
+  
+      // Tìm ví giao dịch nhiều nhất
+      const mostActiveWallet = await this.tradingOrderRepository
+        .createQueryBuilder('o')
+        .select('o.order_wallet_id', 'walletId')
+        .addSelect('COUNT(*)', 'orderCount')
+        .leftJoin('o.wallet', 'wallet')
+        .addSelect('wallet.wallet_nick_name', 'nickName')
+        .addSelect('wallet.wallet_solana_address', 'solanaAddress')
+        .groupBy('o.order_wallet_id')
+        .addGroupBy('wallet.wallet_nick_name')
+        .addGroupBy('wallet.wallet_solana_address')
+        .orderBy('COUNT(*)', 'DESC')
+        .limit(1)
+        .getRawOne();
+  
+      // ==================== REFERRAL STATISTICS ====================
+      
+      // Traditional Referral Stats - sử dụng logic giống hệt getTraditionalReferralStatistics
+      const traditionalReferrals = await this.walletReferentRepository.find({
+        relations: ['invitee', 'referent', 'rewards']
+      });
+  
+      const uniqueTraditionalWallets = new Set();
+      const walletStats = new Map();
+  
+      traditionalReferrals.forEach(referral => {
+        const inviteeId = referral.invitee.wallet_id;
+        const referentId = referral.referent.wallet_id;
+        
+        uniqueTraditionalWallets.add(inviteeId);
+        uniqueTraditionalWallets.add(referentId);
+  
+        // Tính reward cho referral này
+        const referralReward = (referral.rewards || []).reduce((sum, reward) => {
+          return sum + (parseFloat(String(reward.wrr_use_reward)) || 0);
+        }, 0);
+  
+        // Cập nhật thống kê theo wallet
+        if (!walletStats.has(inviteeId)) {
+          walletStats.set(inviteeId, {
+            walletId: inviteeId,
+            totalInviteeReward: 0,
+            totalReferrerReward: 0
+          });
         }
+  
+        if (!walletStats.has(referentId)) {
+          walletStats.set(referentId, {
+            walletId: referentId,
+            totalInviteeReward: 0,
+            totalReferrerReward: 0
+          });
+        }
+  
+        const inviteeWallet = walletStats.get(inviteeId);
+        const referentWallet = walletStats.get(referentId);
+  
+        // Cập nhật thống kê wallet
+        inviteeWallet.totalInviteeReward += referralReward;
+        referentWallet.totalReferrerReward += referralReward;
+      });
+  
+      // Tính tổng phần thưởng của tất cả ví (giống hệt getTraditionalReferralStatistics)
+      const walletArray = Array.from(walletStats.values());
+      const totalTraditionalRewards = walletArray.reduce((sum, wallet) => {
+        return sum + wallet.totalInviteeReward + wallet.totalReferrerReward;
+      }, 0);
+  
+      // BG Affiliate Stats
+      const bgAffiliateOverview = await this.getBgAffiliateOverview();
+  
+      // Tính volume cho traditional referrals
+      const traditionalWalletsArray = Array.from(uniqueTraditionalWallets);
+      let traditionalVolume = 0;
+      
+      if (traditionalWalletsArray.length > 0) {
+        const traditionalVolumeStats = await this.dataSource.createQueryBuilder()
+          .select('COALESCE(SUM(orders.order_total_value), 0)', 'totalVolume')
+          .from('trading_orders', 'orders')
+          .where('orders.order_wallet_id IN (:...walletIds)', { 
+            walletIds: traditionalWalletsArray 
+          })
+          .andWhere('orders.order_status = :status', { status: 'executed' })
+          .getRawOne();
+  
+        traditionalVolume = parseFloat(traditionalVolumeStats?.totalVolume || '0');
       }
-    };
-  }
+  
+      return {
+        wallets: {
+          totalWallets,
+          activeWallets,
+          newWalletsToday,
+          newWalletsThisWeek
+        },
+        orders: {
+          totalOrders,
+          executedOrders,
+          pendingOrders,
+          totalVolume: Number(totalVolume.toFixed(2)),
+          averageOrderValue: Number(averageOrderValue.toFixed(2)),
+          mostActiveWallet: mostActiveWallet ? {
+            walletId: Number(mostActiveWallet.walletId),
+            nickName: mostActiveWallet.nickName || '',
+            solanaAddress: mostActiveWallet.solanaAddress || '',
+            orderCount: Number(mostActiveWallet.orderCount)
+          } : null
+        },
+        referrals: {
+          traditionalReferrals: {
+            totalRelations: traditionalReferrals.length,
+            totalRewards: Number(totalTraditionalRewards.toFixed(5)),
+            totalWallets: uniqueTraditionalWallets.size,
+            totalVolume: Number(traditionalVolume.toFixed(2)),
+            averageRewardPerWallet: uniqueTraditionalWallets.size > 0 
+              ? Number((totalTraditionalRewards / uniqueTraditionalWallets.size).toFixed(5)) 
+              : 0
+          },
+          bgAffiliate: {
+            totalTrees: bgAffiliateOverview.totalTrees,
+            totalMembers: bgAffiliateOverview.totalMembers,
+            totalCommissionDistributed: bgAffiliateOverview.totalCommissionDistributed,
+            totalVolume: bgAffiliateOverview.totalVolume
+          }
+        }
+      };
+    }
 
   /**
    * Lấy thông tin wallet

@@ -41,6 +41,7 @@ import { BittworldToken } from '../bittworlds/entities/bittworld-token.entity';
 import { AirdropAdminService } from './airdrop-admin.service';
 import { SharedModule } from '../shared/shared.module';
 import { OnChainModule } from '../on-chain/on-chain.module';
+import { SolanaModule } from '../solana/solana.module';
 import { ScheduledTasksService } from './scheduled-tasks.service';
 
 @Module({
@@ -90,6 +91,7 @@ import { ScheduledTasksService } from './scheduled-tasks.service';
     BittworldsModule,
     SharedModule,
     OnChainModule,
+    SolanaModule,
   ],
   controllers: [AdminController],
   providers: [AdminService, AdminGateway, AdminJwtStrategy, AirdropAdminService, ScheduledTasksService],
