@@ -1376,12 +1376,39 @@ export class AdminService implements OnModuleInit {
 
     // Lấy tất cả nodes để đếm members
     const allNodes = await this.bgRefService['bgAffiliateNodeRepository'].find();
-    const totalMembers = allNodes.filter(node => node.ban_parent_wallet_id !== null).length;
+    
+    // Lọc theo isBittworld nếu có
+    let allowedWalletIds: Set<number> | null = null;
+    if (isBittworld !== undefined && isBittworld !== null) {
+      const isBittworldBool = isBittworld === 'true';
+      const filteredWalletIds = await this.listWalletRepository
+        .createQueryBuilder('wallet')
+        .select('wallet.wallet_id')
+        .where('wallet.isBittworld = :isBittworld', { isBittworld: isBittworldBool })
+        .getMany();
+      
+      allowedWalletIds = new Set(filteredWalletIds.map(w => w.wallet_id));
+    }
+
+    // Lọc totalMembers theo isBittworld nếu có
+    let totalMembers = allNodes.filter(node => node.ban_parent_wallet_id !== null).length;
+    if (allowedWalletIds) {
+      totalMembers = allNodes.filter(node => 
+        node.ban_parent_wallet_id !== null && allowedWalletIds!.has(node.ban_wallet_id)
+      ).length;
+    }
 
     // Tính tổng commission đã phân phối
-    const totalCommissionDistributed = allRewards.reduce((sum, reward) => 
+    let totalCommissionDistributed = allRewards.reduce((sum, reward) => 
       sum + Number(reward.bacr_commission_amount), 0
     );
+    
+    // Lọc totalCommissionDistributed theo isBittworld nếu có
+    if (allowedWalletIds) {
+      totalCommissionDistributed = allRewards
+        .filter(reward => allowedWalletIds!.has(reward.bacr_wallet_id))
+        .reduce((sum, reward) => sum + Number(reward.bacr_commission_amount), 0);
+    }
 
     // Tính tổng volume từ trading_orders - chỉ tính volume của các ví tham gia BG Affiliate
     const volumeStatsQuery = this.dataSource.createQueryBuilder()
@@ -1411,15 +1438,7 @@ export class AdminService implements OnModuleInit {
     // Lọc top earners theo isBittworld nếu có
     let filteredWalletEarnings = Array.from(walletEarnings.entries());
     
-    if (isBittworld !== undefined && isBittworld !== null) {
-      const isBittworldBool = isBittworld === 'true';
-      const filteredWalletIds = await this.listWalletRepository
-        .createQueryBuilder('wallet')
-        .select('wallet.wallet_id')
-        .where('wallet.isBittworld = :isBittworld', { isBittworld: isBittworldBool })
-        .getMany();
-      
-      const allowedWalletIds = new Set(filteredWalletIds.map(w => w.wallet_id));
+    if (allowedWalletIds) {
       filteredWalletEarnings = filteredWalletEarnings.filter(([walletId]) => allowedWalletIds.has(walletId));
     }
 

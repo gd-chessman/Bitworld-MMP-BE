@@ -361,9 +361,12 @@ export class AdminController {
   @UseGuards(JwtAuthAdminGuard)
   @Get('bg-affiliate/statistics')
   @ApiOperation({ summary: 'Get BG affiliate system overview' })
+  @ApiQuery({ name: 'isBittworld', required: false, description: 'Filter by Bittworld users (true/false)' })
   @ApiResponse({ status: 200, description: 'Returns BG affiliate system overview' })
-  async getBgAffiliateOverview(): Promise<any> {
-    return this.adminService.getBgAffiliateOverview();
+  async getBgAffiliateOverview(
+    @Query('isBittworld') isBittworld?: string
+  ): Promise<any> {
+    return this.adminService.getBgAffiliateOverview(isBittworld);
   }
 
   @UseGuards(JwtAuthAdminGuard)
